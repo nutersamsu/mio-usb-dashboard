@@ -1,9 +1,11 @@
-"""Maquinas do Proxmox (pvesh) e servicos testados por TCP, no formato da linha do Mio."""
+"""Maquinas do Proxmox (API com token so leitura, ou pvesh) e servicos testados por TCP, no formato da linha do Mio."""
 import json
 import socket
+import ssl
 import subprocess
 import threading
 import time
+from urllib.request import Request, urlopen
 
 MAX_MAQUINAS = 6
 
@@ -38,6 +40,31 @@ def _pvesh():
     r = subprocess.run(["pvesh", "get", "/cluster/resources", "--type", "vm",
                         "--output-format", "json"], capture_output=True, text=True, timeout=5)
     return r.stdout
+
+
+def _abrir(req, timeout, ctx=None):
+    with urlopen(req, timeout=timeout, context=ctx) as r:
+        return r.read()
+
+
+def leitor_api(url, token_arquivo, ca=None, timeout=5, abrir=None):
+    """Funcao que le /cluster/resources pela API do PVE com um token (papel PVEAuditor).
+
+    Dispensa root: o servico roda com usuario proprio. O token e lido a cada chamada
+    (trocar o arquivo nao exige reiniciar) e nunca vai para log ou mensagem de erro."""
+    if abrir is None:
+        ctx = ssl.create_default_context(cafile=ca) if ca else ssl.create_default_context()
+
+        def abrir(req, timeout):
+            return _abrir(req, timeout, ctx)
+
+    def ler():
+        with open(token_arquivo) as f:
+            token = f.read().strip()
+        req = Request(url.rstrip("/") + "/api2/json/cluster/resources?type=vm",
+                      headers={"Authorization": "PVEAPIToken=" + token})
+        return json.dumps(json.loads(abrir(req, timeout))["data"])
+    return ler
 
 
 def ler_maquinas(ler=_pvesh):

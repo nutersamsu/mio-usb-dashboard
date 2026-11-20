@@ -5,7 +5,7 @@ Transforma o GPS **Mio DigiWalker C250 Plus** (Samsung S3C2440 / ARM920T, 64 MB,
 ```
 mio-usb-dashboard/
 ├── host/                     → roda no Proxmox/Linux
-│   ├── server.py             coletor + HTTP :8080 (3 vistas 320x240) + envio pela serial USB
+│   ├── server.py             coletor + envio pela serial USB (+ HTTP opcional, só local)
 │   ├── fonte_zabbix.py       internet da casa (WAN do OPNsense) lida do Zabbix
 │   ├── fonte_pve.py          VMs/CTs (pvesh) e serviços por TCP
 │   ├── fonte_internet.py     teste de queda da internet (ping) e horário de silêncio
@@ -95,7 +95,7 @@ O `MioDash.exe` (deste projeto) já vem compilado em `sdcard/MioAutoRun/Apps/`.
 
 - **Rodando:** serviço `mio-dashboard` no pve (192.168.1.11), em `/opt/mio-usb-dashboard/host`, liga sozinho no boot. Mio na USB do pve → `/dev/mio` (driver `ipaq` do kernel + regra udev `99-mio-c250.rules`).
 - **Telas (tempo em `tempo_tela` no config.json, hoje 20 s; toque avança, × fecha):** Internet, Servidor, Máquinas, Serviços e Alerta (só com alerta; o tema fica vermelho).
-- **Internet:** Zabbix em `http://192.168.1.10:8086`, usuário **`mio-painel` só leitura** (grupo `mio-painel`, leitura no grupo Network), token em `/root/.config/mio-painel-zabbix.token` (600) no pve. Itens do host `opnsense`: velocidade `net.if.in/out[igc0,bytes]` (53638/53639, a cada 10 s, tag `uso=mio-painel`); consumo hoje/mês somado de `net.if.in/out[igc0]` (50871/50879, trends + histórico, fuso Europe/Rome). Arco de download em escala log 1–1000 Mbit/s.
+- **Internet:** Zabbix em `http://192.168.1.10:8086`, usuário **`mio-painel` só leitura** (grupo `mio-painel`, leitura no grupo Network), token em `/etc/mio-dashboard/zabbix.token` (600, dono `mio-painel`) no pve. Itens do host `opnsense`: velocidade `net.if.in/out[igc0,bytes]` (53638/53639, a cada 10 s, tag `uso=mio-painel`); consumo hoje/mês somado de `net.if.in/out[igc0]` (50871/50879, trends + histórico, fuso Europe/Rome). Arco de download em escala log 1–1000 Mbit/s.
 - **COM9 do Mio:** quem segura a porta é o **`MutDevice*.exe`** (serviço da Mitac). O MioDash fecha esse processo (via `toolhelp.dll`) quando a abertura dá erro 12/32 e tenta de novo; vale até o reset do Mio. A ROM **não tem** Serial_Class, Mass_Storage, TCP/IP nem PPP (por isso o ActiveSync nunca funcionou).
 - **Tirar/pôr o cartão derruba a USB do Mio** por alguns segundos; o MioDash reconecta sozinho.
 - **Compilar:** CeGCC 9.3.0 (MaxKellermann/cegcc-build) em `/opt/cegcc` de um LXC temporário; `make` em `device/`. O exe só importa COREDLL.
@@ -169,9 +169,22 @@ nano config.json
 ./setup_usb_serial.sh --udev      # carrega 'ipaq', ensina o PID 3340:043a, cria /dev/mio
 
 # 4) rodar:
-python3 server.py                 # web em http://IP_DO_PROXMOX:8080/?view=sys + serial
+python3 server.py                 # serial; web só se "http": true (em 127.0.0.1:8080 por padrão)
 
-# 5) deixar como serviço:
+# 5) usuário próprio, credenciais só leitura e serviço (sem root):
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin mio-painel
+install -d -m 700 -o mio-painel -g mio-painel /etc/mio-dashboard
+install -m 644 /etc/pve/pve-root-ca.pem /etc/mio-dashboard/
+pveum user add mio@pve --comment "Mio USB Dashboard - so leitura"
+pveum acl modify / --users mio@pve --roles PVEAuditor
+umask 077; pveum user token add mio@pve painel --privsep 0 --output-format json \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['full-tokenid']+'='+d['value'])" \
+  > /etc/mio-dashboard/pve.token
+#    (opcional) token do Zabbix em /etc/mio-dashboard/zabbix.token
+chown mio-painel:mio-painel /etc/mio-dashboard/*.token; chmod 600 /etc/mio-dashboard/*.token
+#    no config.json: "proxmox_api": {"url": "https://127.0.0.1:8006",
+#                     "token_arquivo": "/etc/mio-dashboard/pve.token",
+#                     "ca": "/etc/mio-dashboard/pve-root-ca.pem"}
 cp mio-dashboard.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now mio-dashboard
 journalctl -u mio-dashboard -f
@@ -181,7 +194,8 @@ journalctl -u mio-dashboard -f
 - **Rede:** a interface `auto` é a da rota padrão (no Proxmox, normalmente `vmbr0`). O ping `auto` vai para o gateway.
 - **Proxmox:** com `"proxmox": true`, ele conta as VMs e CTs rodando (`qm list` / `pct list`).
 - **Alertas:** CPU > 85 %, RAM > 90 %, disco > 90 %, temperatura > 85 °C, 3 pings seguidos perdidos, ou serviço OFF. Com alerta ativo, a tela fixa em vermelho até normalizar.
-- **Vistas web:** `/?view=sys` → `net` → `alert`, trocando por `<meta refresh>` a cada 5 s. Há também `/api` (JSON).
+- **Segurança:** ver [SECURITY.md](SECURITY.md). O serviço roda como `mio-painel` (grupo `dialout` para a serial), lê o Proxmox pela API com token `PVEAuditor` e sai com código 78 se o `config.json` for inválido (o systemd não fica reiniciando).
+- **Vistas web:** desligadas no pve (`"http": false`). Com `"http": true`: `/?view=sys` → `net` → `alert`, trocando por `<meta refresh>` a cada 5 s. Há também `/api` (JSON).
 
 ### Protocolo serial (host → Mio)
 Uma linha ASCII a cada `intervalo` segundos, a 115200 8N1:

@@ -63,13 +63,14 @@ class TestExtrasRobustos(unittest.TestCase):
         c = server.Coletor.__new__(server.Coletor)
         c.cfg = server.carregar_config(None)
         c._extra, c._extra_em = {}, {}
+        c.ler_pve = None
 
         class Quebrada:
             def atualizar(self, agora):
                 raise RuntimeError("inesperado")
         c.internet = Quebrada()
         orig_m, orig_s = server.ler_maquinas, server.testar_servicos
-        server.ler_maquinas = lambda: {"nvm": "1/1", "vm1": "a;VM 1;1;1%;1,0 GB"}
+        server.ler_maquinas = lambda ler: {"nvm": "1/1", "vm1": "a;VM 1;1;1%;1,0 GB"}
         server.testar_servicos = lambda lista: (_ for _ in ()).throw(KeyError("nome"))
         try:
             d = c.extras(1000.0)

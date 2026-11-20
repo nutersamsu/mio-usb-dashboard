@@ -1,5 +1,6 @@
 {
-  "listen": "0.0.0.0",
+  "http": false,
+  "listen": "127.0.0.1",
   "port": 8080,
   "intervalo": 2,
   "rotacao": 5,
@@ -59,7 +60,7 @@
   },
   "zabbix": {
     "url": "http://192.168.1.10:8086/api_jsonrpc.php",
-    "token_arquivo": "/root/.config/mio-painel-zabbix.token",
+    "token_arquivo": "/etc/mio-dashboard/zabbix.token",
     "item_in": "53638",
     "item_out": "53639",
     "total_in": "50871",
@@ -74,5 +75,10 @@
     "falhas": 3,
     "som": true,
     "silencio": "23-7"
+  },
+  "proxmox_api": {
+    "url": "https://127.0.0.1:8006",
+    "token_arquivo": "/etc/mio-dashboard/pve.token",
+    "ca": "/etc/mio-dashboard/pve-root-ca.pem"
   }
 }

@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fonte_internet import TesteInternet, em_silencio  # noqa: E402
+import fonte_pve  # noqa: E402
 from fonte_pve import ler_maquinas, testar_servicos  # noqa: E402
 from fonte_zabbix import Internet, Zabbix  # noqa: E402
 from urllib.parse import urlparse, parse_qs
@@ -42,7 +43,8 @@ except Exception:  # pragma: no cover
 AQUI = os.path.dirname(os.path.abspath(__file__))
 
 CONFIG_PADRAO = {
-    "listen": "0.0.0.0",
+    "http": True,                   # paginas HTML (modo navegador/RNDIS); o Mio C250 usa so a serial
+    "listen": "127.0.0.1",          # so local; para a LAN use o IP da LAN, nunca 0.0.0.0 sem motivo
     "port": 8080,
     "intervalo": 2,                 # segundos entre coletas
     "rotacao": 5,                   # segundos por vista no navegador
@@ -86,6 +88,21 @@ def carregar_config(caminho):
     return cfg
 
 
+EX_CONFIG = 78                      # erro de configuracao: o systemd nao reinicia (RestartPreventExitStatus)
+
+
+def carregar_config_ou_sair(caminho):
+    try:
+        return carregar_config(caminho)
+    except (OSError, ValueError) as e:
+        sys.stderr.write("config invalida (%s): %s\n" % (caminho, e))
+        sys.exit(EX_CONFIG)
+
+
+def http_ativo(cfg):
+    return bool(cfg.get("http", True))
+
+
 def rota_padrao():
     """(interface, gateway) da rota padrao, lendo /proc/net/route."""
     for linha in ler("/proc/net/route").splitlines()[1:]:
@@ -118,10 +135,15 @@ class Coletor:
         self.internet = None
         it = cfg.get("internet_teste", {})
         self.teste_net = TesteInternet(it.get("alvos", ["1.1.1.1", "8.8.8.8"]), int(it.get("falhas", 3)))
+        api = cfg.get("proxmox_api")
+        self.ler_pve = (fonte_pve.leitor_api(api["url"], api["token_arquivo"], api.get("ca"))
+                        if api else fonte_pve._pvesh)
         z = cfg.get("zabbix")
         if z:
             token = ler(z["token_arquivo"]).strip()
-            if token:
+            if not token:
+                sys.stderr.write("zabbix: token vazio ou ilegivel em %s\n" % z["token_arquivo"])
+            else:
                 self.internet = Internet(Zabbix(z["url"], token), z["item_in"], z["item_out"],
                                          z["total_in"], z["total_out"])
 
@@ -282,7 +304,7 @@ class Coletor:
         tarefas = [("internet", 10, lambda: self.internet.atualizar(
                         datetime.now(timezone.utc)) if self.internet else {"wok": "0"},
                     {"wok": "0"}),
-                   ("maquinas", 5, lambda: ler_maquinas(), {"nvm": "-"}),
+                   ("maquinas", 5, lambda: ler_maquinas(self.ler_pve), {"nvm": "-"}),
                    ("servicos", 10, lambda: testar_servicos(self.cfg["servicos"]), {"nsv": "-"}),
                    ("net", 10, lambda: self._testar_net(agora), {"net": "1", "som": "0"})]
         for nome, periodo, f, se_falhar in tarefas:
@@ -536,7 +558,7 @@ def main():
     ap.add_argument("--config", default=os.path.join(AQUI, "config.json"))
     ap.add_argument("--once", action="store_true", help="coleta uma vez, imprime e sai")
     a = ap.parse_args()
-    cfg = carregar_config(a.config)
+    cfg = carregar_config_ou_sair(a.config)
     col = Coletor(cfg)
     if a.once:
         col.cpu(); time.sleep(1); col.coletar(); time.sleep(1)
@@ -544,9 +566,13 @@ def main():
         print(json.dumps(d, indent=2, ensure_ascii=False))
         print(linha_serial(d).decode().rstrip())
         return
-    threading.Thread(target=col.loop, daemon=True).start()
     if cfg["serial"]["ativo"]:
         threading.Thread(target=loop_serial, args=(col, cfg), daemon=True).start()
+    if not http_ativo(cfg):
+        sys.stderr.write("HTTP desligado (config http=false); so serial\n")
+        col.loop()
+        return
+    threading.Thread(target=col.loop, daemon=True).start()
     Handler.coletor, Handler.cfg = col, cfg
     srv = ThreadingHTTPServer((cfg["listen"], cfg["port"]), Handler)
     sys.stderr.write("Mio dashboard em http://%s:%d/?view=sys\n" % (cfg["listen"], cfg["port"]))

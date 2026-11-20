@@ -1,14 +1,50 @@
 [Unit]
 Description=Mio USB Dashboard (metricas para o GPS Mio C250)
-After=network-online.target
+Wants=network-online.target
+After=network-online.target pveproxy.service
+# falha permanente: no maximo 10 tentativas em 10 min, depois desiste (ver journalctl)
+StartLimitIntervalSec=600
+StartLimitBurst=10
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/mio-usb-dashboard/host/server.py --config /opt/mio-usb-dashboard/host/config.json
-Restart=always
+ExecStart=/usr/bin/python3 -B /opt/mio-usb-dashboard/host/server.py --config /opt/mio-usb-dashboard/host/config.json
+Restart=on-failure
 RestartSec=5
-# root para ler qm/pct do Proxmox e abrir /dev/mio
-User=root
+# 78 = config invalida: nao adianta reiniciar
+RestartPreventExitStatus=78
+TimeoutStopSec=10
+
+# Usuario proprio, sem root: Proxmox pela API (token PVEAuditor), serial pelo grupo dialout
+User=mio-painel
+Group=mio-painel
+SupplementaryGroups=dialout
+UMask=0077
+
+# Endurecimento
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# so a serial USB do Mio (driver ipaq -> ttyUSB)
+DevicePolicy=closed
+DeviceAllow=char-ttyUSB rw
 
 [Install]
 WantedBy=multi-user.target
