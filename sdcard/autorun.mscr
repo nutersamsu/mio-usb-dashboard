@@ -1,0 +1,35 @@
+# Gatilho de inicializacao (MortScript 4.2) - mesmo conteudo em todos os gatilhos:
+#   \Oscar91ADM.mscr   <- o que o C250 Plus realmente executa ao inserir o cartao
+#   \autorun.mscr, \GOCE.mscr, \2577\autorun.mscr, \MioMap\MioMap.mscr (outros firmwares)
+# Localiza a pasta MioAutoRun no cartao e chama MioAutoRun\MioAutoRun.mscr.
+# Atencao: no MortScript, texto se compara com eq / ne (nao com = / <>).
+
+sp = SystemPath("ScriptPath")
+pai = FilePath(sp)
+base = ""
+
+If (FileExists(sp & "\MioAutoRun\MioAutoRun.mscr"))
+    base = sp & "\MioAutoRun"
+EndIf
+If (base eq "")
+    If (FileExists(pai & "\MioAutoRun\MioAutoRun.mscr"))
+        base = pai & "\MioAutoRun"
+    EndIf
+EndIf
+If (base eq "")
+    Message("Nao encontrei MioAutoRun\MioAutoRun.mscr no cartao.", "Mio Dashboard")
+    Exit
+EndIf
+
+# Evita abrir duas vezes quando mais de um gatilho dispara junto
+agora = TimeStamp()
+ultimo = RegRead("HKCU", "Software\MioUnlock", "Inicio")
+If (ultimo ne "")
+    If (agora - ultimo < 20)
+        Exit
+    EndIf
+EndIf
+RegWriteDword("HKCU", "Software\MioUnlock", "Inicio", agora)
+RegWriteString("HKCU", "Software\MioUnlock", "Base", base)
+
+CallScript(base & "\MioAutoRun.mscr")

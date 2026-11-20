@@ -1,0 +1,14 @@
+[Unit]
+Description=Mio USB Dashboard (metricas para o GPS Mio C250)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/mio-usb-dashboard/host/server.py --config /opt/mio-usb-dashboard/host/config.json
+Restart=always
+RestartSec=5
+# root para ler qm/pct do Proxmox e abrir /dev/mio
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,130 @@
+# =====================================================================
+#  Mio C250 Plus - inicializacao do dashboard (MortScript 4.2)
+#  Chamado pelos gatilhos da raiz do cartao (Oscar91ADM.mscr no C250 Plus)
+#  ou direto, tocando em MioAutoRun\MioAutoRun.exe.
+#  Texto se compara com eq / ne. O Mio monta o cartao SO LEITURA: nada e
+#  gravado no cartao; configuracoes ficam no registro do WinCE.
+# =====================================================================
+
+# ---------- Configuracao ----------
+URL         = "http://192.168.55.1:8080/?view=sys"   # modo navegador (precisa RNDIS + iesample)
+PORTA_SER   = "COM9:"                                # modo serial (C250: COM9 = USB)
+TEMPO_MENU  = 5                                      # segundos para escolher o menu de manutencao
+# ----------------------------------
+
+R = "Software\MioUnlock"
+# Pasta do kit: o gatilho grava no registro, mas o valor pode ser de outra
+# insercao/cartao (ex. "\Storage Card2"). Usa a que tiver o MioDash.exe.
+baseReg = RegRead("HKCU", R, "Base")
+baseScr = SystemPath("ScriptPath")
+base = baseScr
+If (baseReg ne "")
+    If (FileExists(baseReg & "\Apps\MioDash.exe"))
+        base = baseReg
+    EndIf
+EndIf
+If (FileExists(baseScr & "\Apps\MioDash.exe"))
+    base = baseScr
+EndIf
+RegWriteString("HKCU", R, "Base", base)
+
+# 0) Da a chance de abrir o menu de manutencao (padrao: dashboard em TEMPO_MENU s)
+ChoiceDefault("Mio Dashboard", "Iniciando o dashboard...", 1, TEMPO_MENU, "Dashboard", "Menu de manutencao")
+Case 2
+    CallScript(base & "\menu.mscr")
+    Exit
+Case 0
+    Exit
+EndChoice
+
+# 1) Encerra o software original da Mio
+If (ProcExists("MioMap.exe"))
+    Kill("MioMap.exe")
+EndIf
+
+# 2) Tela sempre ligada (backlight e suspensao desativados)
+RegWriteDword("HKCU", "ControlPanel\Backlight", "BatteryTimeout", 0)
+RegWriteDword("HKCU", "ControlPanel\Backlight", "ACTimeout", 0)
+RegWriteDword("HKCU", "ControlPanel\Backlight", "UseBattery", 0)
+RegWriteDword("HKCU", "ControlPanel\Backlight", "UseExt", 0)
+RegWriteDword("HKLM", "System\CurrentControlSet\Control\Power\Timeouts", "ACUserIdle", 0)
+RegWriteDword("HKLM", "System\CurrentControlSet\Control\Power\Timeouts", "ACSystemIdle", 0)
+RegWriteDword("HKLM", "System\CurrentControlSet\Control\Power\Timeouts", "ACSuspend", 0)
+RegWriteDword("HKLM", "System\CurrentControlSet\Control\Power\Timeouts", "BattUserIdle", 0)
+RegWriteDword("HKLM", "System\CurrentControlSet\Control\Power\Timeouts", "BattSystemIdle", 0)
+RegWriteDword("HKLM", "System\CurrentControlSet\Control\Power\Timeouts", "BattSuspend", 0)
+
+# 3) Escolhe o modo
+temRndis = RegKeyExists("HKLM", "Drivers\USB\FunctionDrivers\RNDIS")
+temIE = FileExists("\Windows\iesample.exe")
+temCliente = FileExists(base & "\Apps\MioDash.exe")
+
+If (temRndis AND temIE)
+    # ---- Modo navegador (RNDIS) - NAO disponivel no C250 Plus testado ----
+    atual = RegRead("HKLM", "Drivers\USB\FunctionDrivers", "DefaultClientDriver")
+    If (atual ne "RNDIS")
+        RegWriteString("HKCU", R, "UsbOriginal", atual)
+        RegWriteString("HKLM", "Drivers\USB\FunctionDrivers", "DefaultClientDriver", "RNDIS")
+    EndIf
+    RegWriteDword("HKLM", "Comm\RNDISFN1\Parms\TcpIp", "EnableDHCP", 0)
+    RegWriteString("HKLM", "Comm\RNDISFN1\Parms\TcpIp", "IpAddress", "192.168.55.2")
+    RegWriteString("HKLM", "Comm\RNDISFN1\Parms\TcpIp", "Subnetmask", "255.255.255.0")
+    RegWriteString("HKLM", "Comm\RNDISFN1\Parms\TcpIp", "DefaultGateway", "192.168.55.1")
+    If (atual ne "RNDIS")
+        Message("USB mudado para RNDIS. Reconecte o cabo USB e toque OK.", "Mio Dashboard")
+    EndIf
+    Run("\Windows\iesample.exe", URL)
+Else
+    If (temCliente)
+        # ---- Modo serial USB (caminho real do C250 Plus) ----
+        # A COM9 so pode ter um dono: fecha copias antigas do MioDash e os
+        # programas de sincronizacao do WinCE que abrem a serial da USB.
+        tentativas = 0
+        While (ProcExists("MioDash.exe") AND tentativas < 10)
+            Kill("MioDash.exe")
+            Sleep(500)
+            tentativas = tentativas + 1
+        EndWhile
+        If (ProcExists("repllog.exe"))
+            Kill("repllog.exe")
+        EndIf
+        If (ProcExists("rapiclnt.exe"))
+            Kill("rapiclnt.exe")
+        EndIf
+        If (ProcExists("rnaapp.exe"))
+            Kill("rnaapp.exe")
+        EndIf
+        If (ProcExists("MioDash.exe"))
+            Message("Nao consegui fechar o MioDash anterior. Feche pelo canto superior direito e tente de novo.", "Mio Dashboard")
+            Exit
+        EndIf
+        # Desliga a conexao automatica com o PC ao ligar o cabo (ActiveSync).
+        # Fica no registro ate um hard reset.
+        RegWriteDword("HKCU", "ControlPanel\Comm", "AutoCnct", 0)
+        Sleep(1500)    # deixa o WinCE liberar a COM9
+        Run(base & "\Apps\MioDash.exe", PORTA_SER)
+
+        # Vigia da COM9: o WinCE reabre o repllog.exe (ActiveSync) toda vez
+        # que o cabo USB e ligado, e ele toma a porta. Enquanto o MioDash
+        # estiver aberto, este script fica em segundo plano fechando-o.
+        Sleep(3000)
+        While (ProcExists("MioDash.exe"))
+            If (ProcExists("repllog.exe"))
+                Kill("repllog.exe")
+            EndIf
+            If (ProcExists("rapiclnt.exe"))
+                Kill("rapiclnt.exe")
+            EndIf
+            If (ProcExists("rnaapp.exe"))
+                Kill("rnaapp.exe")
+            EndIf
+            If (ProcExists("udp2tcp.exe"))
+                Kill("udp2tcp.exe")
+            EndIf
+            Sleep(1000)
+        EndWhile
+    Else
+        Message("Nao achei MioDash.exe em:^NL^" & baseReg & "\Apps^NL^" & baseScr & "\Apps^NL^^NL^Copie o MioDash.exe para MioAutoRun\Apps no cartao. Abrindo o menu de manutencao.", "Mio Dashboard")
+        CallScript(base & "\menu.mscr")
+    EndIf
+EndIf

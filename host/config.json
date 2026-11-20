@@ -1,0 +1,69 @@
+{
+  "listen": "0.0.0.0",
+  "port": 8080,
+  "intervalo": 2,
+  "rotacao": 5,
+  "interface": "auto",
+  "ping_alvo": "auto",
+  "disco": "/",
+  "servicos": [
+    {
+      "nome": "Jellyfin",
+      "check": "tcp:192.168.1.12:8096"
+    },
+    {
+      "nome": "Portainer",
+      "check": "tcp:192.168.1.10:9443"
+    },
+    {
+      "nome": "Proxy NPM",
+      "check": "tcp:192.168.1.10:81"
+    },
+    {
+      "nome": "qBittorrent",
+      "check": "tcp:192.168.1.10:8081"
+    },
+    {
+      "nome": "Seerr",
+      "check": "tcp:192.168.1.10:5056"
+    },
+    {
+      "nome": "Navidrome",
+      "check": "tcp:192.168.1.10:4533"
+    },
+    {
+      "nome": "Zabbix",
+      "check": "tcp:192.168.1.10:8086"
+    },
+    {
+      "nome": "DNS",
+      "check": "tcp:192.168.1.1:53"
+    },
+    {
+      "nome": "CrowdSec",
+      "check": "tcp:192.168.1.10:8088"
+    }
+  ],
+  "proxmox": false,
+  "limites": {
+    "cpu": 85,
+    "ram": 90,
+    "disco": 90,
+    "temp": 85,
+    "ping_falhas": 3
+  },
+  "serial": {
+    "ativo": true,
+    "porta": "/dev/mio",
+    "baud": 115200
+  },
+  "zabbix": {
+    "url": "http://192.168.1.10:8086/api_jsonrpc.php",
+    "token_arquivo": "/root/.config/mio-painel-zabbix.token",
+    "item_in": "53638",
+    "item_out": "53639",
+    "total_in": "50871",
+    "total_out": "50879"
+  },
+  "tempo_tela": 20
+}

@@ -1,0 +1,13 @@
+Encaminhador NMEA (opcional)
+============================
+O MortScript nao le porta serial. Para encaminhar o GPS interno (COM2)
+para a USB/serial, coloque aqui um programa ARM para WinCE 5.0 que faca
+isso e crie um iniciar.mscr chamando ele, por exemplo:
+
+    p = RegRead("HKCU", "Software\MioUnlock", "GpsPorta")
+    v = RegRead("HKCU", "Software\MioUnlock", "GpsBaud")
+    b = RegRead("HKCU", "Software\MioUnlock", "Base")
+    Run(b & "\Tools\nmea\SEU_PROGRAMA.exe", p & " " & v)
+
+O menu chama iniciar.mscr na opcao "GPS: NMEA para USB/serial".
+Sem ele, o menu abre o File Manager CE para voce ver os dados crus do GPS.

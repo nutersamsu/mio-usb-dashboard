@@ -1,0 +1,298 @@
+# =====================================================================
+#  Mio DigiWalker C250 Plus - menu de desbloqueio pelo cartao SD
+#  MortScript 4.2 / Windows CE 5.0 Core / ARMv4
+#  Nao grava nada na flash interna, exceto valores de REGISTRO
+#  (que um hard reset desfaz). O valor original do USB fica no registro.
+#  Cada Sub rele as configuracoes do registro de proposito: assim funciona
+#  com variaveis globais ou locais, sem depender de parametros em Call().
+# =====================================================================
+
+# ---------- Configuracao ----------
+AUTO_RNDIS       = 0        # C250 testado: imagem NAO tem driver RNDIS. 1 = tenta trocar o USB ao iniciar
+FECHAR_MIOMAP    = 1        # 1 = fecha MioMap.exe ao iniciar
+FECHAR_SHELL     = 0        # 1 = fecha a interface Mio (MainShell) ao iniciar. Deixe 0 ate testar.
+ATIVAR_SERVICOS  = 1        # 1 = liga Telnet/FTP do WinCE se existirem na imagem
+GPS_PORTA        = "COM2:"
+GPS_BAUD         = 57600    # alguns aparelhos usam 4800
+# ----------------------------------
+
+R = "Software\MioUnlock"
+base = RegRead("HKCU", R, "Base")
+If (base eq "")
+    base = SystemPath("ScriptPath")
+    RegWriteString("HKCU", R, "Base", base)
+EndIf
+RegWriteString("HKCU", R, "GpsPorta", GPS_PORTA)
+RegWriteDword("HKCU", R, "GpsBaud", GPS_BAUD)
+
+# 1) Fecha a navegacao original
+If (FECHAR_MIOMAP)
+    If (ProcExists("MioMap.exe"))
+        Kill("MioMap.exe")
+    EndIf
+EndIf
+If (FECHAR_SHELL)
+    Call("FecharShell")
+EndIf
+
+# 2) USB em modo rede (RNDIS)
+If (AUTO_RNDIS)
+    RegWriteString("HKCU", R, "UsbAlvo", "RNDIS")
+    Call("UsbModo")
+EndIf
+
+# 3) Servicos de rede do proprio WinCE (so se a imagem tiver)
+If (ATIVAR_SERVICOS)
+    Call("AtivarServicos")
+EndIf
+
+# 4) Menu
+While (TRUE)
+    Choice("Mio C250 - Desbloqueio", "Escolha uma opcao:", "Area de trabalho do WinCE", "Total Commander", "GPS: NMEA para USB/serial", "Monitor do sistema (tarefas)", "Informacoes do sistema", "Terminal (cmd)", "Modo USB...", "Fechar a interface Mio", "Sair do menu", "Abrir a navegacao original (MioMap)", "Listar portas COM (diagnostico)", "Diagnostico do sistema")
+    Case 1
+        Call("Desktop")
+    Case 2
+        Call("AbrirArquivos")
+    Case 3
+        Call("Nmea")
+    Case 4
+        Run(base & "\Tools\iTaskMgr.exe")
+    Case 5
+        Run(base & "\Tools\Resinfo.exe")
+    Case 6
+        Call("Terminal")
+    Case 7
+        Call("MenuUsb")
+    Case 8
+        Call("FecharShell")
+    Case 9
+        Exit
+    Case 10
+        Call("NavegacaoOriginal")
+        Exit
+    Case 11
+        Call("ListarPortas")
+    Case 12
+        Call("Diagnostico")
+    Case 0
+        Exit
+    EndChoice
+EndWhile
+
+
+# ======================= Rotinas =======================
+
+# Verifica o que existe na imagem do WinCE (para planejar o dashboard).
+# Mostra em 2 telas: arquivos e registro. S = existe, - = nao existe.
+Sub Diagnostico
+    t = ""
+    t = t & "iesample.exe " & FileExists("\Windows\iesample.exe") & "^NL^"
+    t = t & "iexplore.exe " & FileExists("\Windows\iexplore.exe") & "^NL^"
+    t = t & "htmlview.dll " & FileExists("\Windows\htmlview.dll") & "^NL^"
+    t = t & "mshtml.dll " & FileExists("\Windows\mshtml.dll") & "^NL^"
+    t = t & "wininet.dll " & FileExists("\Windows\wininet.dll") & "^NL^"
+    t = t & "winsock.dll " & FileExists("\Windows\winsock.dll") & "^NL^"
+    t = t & "ws2.dll " & FileExists("\Windows\ws2.dll") & "^NL^"
+    t = t & "ppp.dll " & FileExists("\Windows\ppp.dll") & "^NL^"
+    t = t & "rndisfn.dll " & FileExists("\Windows\rndisfn.dll") & "^NL^"
+    t = t & "mscoree.dll " & FileExists("\Windows\mscoree.dll") & "^NL^"
+    t = t & "aygshell.dll " & FileExists("\Windows\aygshell.dll") & "^NL^"
+    t = t & "commctrl.dll " & FileExists("\Windows\commctrl.dll") & "^NL^"
+    Message(t & "(1 = existe, 0 = nao)", "Diagnostico 1/2: arquivos")
+
+    u = ""
+    u = u & "USB atual: " & RegRead("HKLM", "Drivers\USB\FunctionDrivers", "DefaultClientDriver") & "^NL^"
+    u = u & "Serial_Class: " & RegKeyExists("HKLM", "Drivers\USB\FunctionDrivers\Serial_Class") & "^NL^"
+    u = u & "Mass_Storage: " & RegKeyExists("HKLM", "Drivers\USB\FunctionDrivers\Mass_Storage_Class") & "^NL^"
+    u = u & "COM9 dll: " & RegRead("HKLM", "Drivers\USB\FunctionDrivers\Serial_Class", "Dll") & "^NL^"
+    u = u & "Backlight HKCU: " & RegKeyExists("HKCU", "ControlPanel\Backlight") & "^NL^"
+    u = u & "Power HKLM: " & RegKeyExists("HKLM", "System\CurrentControlSet\Control\Power") & "^NL^"
+    u = u & "TCP/IP: " & RegKeyExists("HKLM", "Comm\Tcpip") & "^NL^"
+    u = u & "RAS/PPP: " & RegKeyExists("HKLM", "Comm\Ppp")
+    Message(u & "^NL^(1 = existe, 0 = nao)", "Diagnostico 2/2: registro")
+EndSub
+
+# Lista os drivers ativos (HKLM\Drivers\Active\NN) cujo nome e uma porta (COMx:)
+# e de qual chave de driver cada um veio. Assim se descobre a porta do GPS.
+Sub ListarPortas
+    lista = ""
+    i = 0
+    While (i < 100)
+        If (i < 10)
+            k = "Drivers\Active\0" & i
+        Else
+            k = "Drivers\Active\" & i
+        EndIf
+        n = RegRead("HKLM", k, "Name")
+        If (n ne "")
+            If (Find(n, "COM") > 0)
+                lista = lista & n & "  " & RegRead("HKLM", k, "Key") & "^NL^"
+            EndIf
+        EndIf
+        i = i + 1
+    EndWhile
+    If (lista eq "")
+        lista = "Nenhuma porta COM ativa encontrada."
+    EndIf
+    Message(lista, "Portas COM ativas")
+EndSub
+
+# Se o gatilho \MioMap\MioMap.exe do cartao substituir o botao Navegacao,
+# esta opcao abre o MioMap original da flash interna.
+Sub NavegacaoOriginal
+    b = RegRead("HKCU", "Software\MioUnlock", "Base")
+    achou = 0
+    If (FileExists("\My Flash Disk\MioMap\MioMap.exe"))
+        Run("\My Flash Disk\MioMap\MioMap.exe")
+        achou = 1
+    EndIf
+    If (achou = 0)
+        If (FileExists("\My Flash Disk\MioMap\MioMap\MioMap.exe"))
+            Run("\My Flash Disk\MioMap\MioMap\MioMap.exe")
+            achou = 1
+        EndIf
+    EndIf
+    If (achou = 0)
+        Message("Nao encontrei o MioMap.exe original em \My Flash Disk\MioMap. Use o Total Commander para procurar.", "Navegacao")
+    EndIf
+EndSub
+
+Sub FecharShell
+    b = RegRead("HKCU", "Software\MioUnlock", "Base")
+    If (WndExists("MainShell"))
+        Close("MainShell")
+        Sleep(1500)
+    EndIf
+    If (ProcExists("MainShell.exe"))
+        Kill("MainShell.exe")
+    EndIf
+EndSub
+
+# Abre um gerenciador de arquivos que funcione neste aparelho:
+# tenta o Total Commander; se ele nao subir em 4 s, usa o Oscar91ADM.
+# Grava em HKCU\Software\MioUnlock: FM (caminho) e FMProc (nome do processo).
+Sub AbrirArquivos
+    b = RegRead("HKCU", "Software\MioUnlock", "Base")
+    RegWriteString("HKCU", "Software\MioUnlock", "FM", "")
+    Run(b & "\Apps\TotalCommander\cecmd.exe")
+    Sleep(4000)
+    If (ProcExists("cecmd.exe"))
+        RegWriteString("HKCU", "Software\MioUnlock", "FM", b & "\Apps\TotalCommander\cecmd.exe")
+        RegWriteString("HKCU", "Software\MioUnlock", "FMProc", "cecmd.exe")
+    Else
+        Run(b & "\Apps\Oscar91ADM.exe")
+        Sleep(4000)
+        If (ProcExists("Oscar91ADM.exe"))
+            RegWriteString("HKCU", "Software\MioUnlock", "FM", b & "\Apps\Oscar91ADM.exe")
+            RegWriteString("HKCU", "Software\MioUnlock", "FMProc", "Oscar91ADM.exe")
+        Else
+            Message("Nenhum gerenciador de arquivos conseguiu abrir.", "Arquivos")
+        EndIf
+    EndIf
+EndSub
+
+Sub Desktop
+    If (FileExists("\Windows\explorer.exe"))
+        Call("FecharShell")
+        If (NOT ProcExists("explorer.exe"))
+            Run("\Windows\explorer.exe")
+        EndIf
+        Show("HHTaskBar")
+    Else
+        Call("AbrirArquivos")
+        fm = RegRead("HKCU", "Software\MioUnlock", "FM")
+        fp = RegRead("HKCU", "Software\MioUnlock", "FMProc")
+        If (fm ne "")
+            Message("Esta imagem nao tem explorer.exe. O gerenciador de arquivos vai ser a area de trabalho e reabre quando for fechado. Para voltar a interface Mio, aperte o reset.", "Area de trabalho")
+            Call("FecharShell")
+            While (TRUE)
+                While (ProcExists(fp))
+                    Sleep(1000)
+                EndWhile
+                Run(fm)
+                Sleep(4000)
+                If (NOT ProcExists(fp))
+                    Message("O gerenciador de arquivos nao reabriu. Aperte o reset para voltar a interface Mio.", "Area de trabalho")
+                    Exit
+                EndIf
+            EndWhile
+        EndIf
+    EndIf
+EndSub
+
+Sub Terminal
+    b = RegRead("HKCU", "Software\MioUnlock", "Base")
+    If (FileExists("\Windows\cmd.exe"))
+        Run("\Windows\cmd.exe")
+    Else
+        Message("Esta imagem nao tem cmd.exe. Abrindo o gerenciador de tarefas.", "Terminal")
+        Run(b & "\Tools\iTaskMgr.exe")
+    EndIf
+EndSub
+
+# Muda o driver USB de funcao. Alvo lido de HKCU\Software\MioUnlock\UsbAlvo:
+# "RNDIS", "Serial_Class" ou "ORIGINAL"
+Sub UsbModo
+    atual = RegRead("HKLM", "Drivers\USB\FunctionDrivers", "DefaultClientDriver")
+    orig = RegRead("HKCU", "Software\MioUnlock", "UsbOriginal")
+    If (orig eq "")
+        RegWriteString("HKCU", "Software\MioUnlock", "UsbOriginal", atual)
+        orig = atual
+    EndIf
+    alvo = RegRead("HKCU", "Software\MioUnlock", "UsbAlvo")
+    If (alvo eq "ORIGINAL")
+        alvo = orig
+    EndIf
+    If (atual ne alvo)
+        If (NOT RegKeyExists("HKLM", "Drivers\USB\FunctionDrivers\" & alvo))
+            Message("O driver USB '" & alvo & "' nao existe nesta imagem do WinCE. Mantido: " & atual, "Modo USB")
+        Else
+            RegWriteString("HKLM", "Drivers\USB\FunctionDrivers", "DefaultClientDriver", alvo)
+            Message("USB alterado de '" & atual & "' para '" & alvo & "'. Desconecte e reconecte o cabo USB (se nao mudar, reinicie pelo botao de reset).", "Modo USB")
+        EndIf
+    EndIf
+EndSub
+
+Sub MenuUsb
+    atual = RegRead("HKLM", "Drivers\USB\FunctionDrivers", "DefaultClientDriver")
+    Choice("Modo USB", "Atual: " & atual, "Rede (RNDIS)", "Porta serial (Serial_Class)", "Restaurar o original", "Voltar")
+    Case 1
+        RegWriteString("HKCU", "Software\MioUnlock", "UsbAlvo", "RNDIS")
+        Call("UsbModo")
+    Case 2
+        RegWriteString("HKCU", "Software\MioUnlock", "UsbAlvo", "Serial_Class")
+        Call("UsbModo")
+    Case 3
+        RegWriteString("HKCU", "Software\MioUnlock", "UsbAlvo", "ORIGINAL")
+        Call("UsbModo")
+    EndChoice
+EndSub
+
+Sub AtivarServicos
+    b = RegRead("HKCU", "Software\MioUnlock", "Base")
+    If (FileExists("\Windows\telnetd.dll"))
+        RegWriteDword("HKLM", "Comm\TELNETD", "IsEnabled", 1)
+        RegWriteDword("HKLM", "Comm\TELNETD", "UseAuthentication", 0)
+    EndIf
+    If (FileExists("\Windows\ftpd.dll"))
+        RegWriteDword("HKLM", "Comm\FTPD", "IsEnabled", 1)
+        RegWriteDword("HKLM", "Comm\FTPD", "UseAuthentication", 0)
+        RegWriteDword("HKLM", "Comm\FTPD", "AllowAnonymous", 1)
+        RegWriteDword("HKLM", "Comm\FTPD", "AllowAnonymousUpload", 1)
+        RegWriteString("HKLM", "Comm\FTPD", "DefaultDir", "\")
+    EndIf
+EndSub
+
+# Encaminhamento NMEA: MortScript nao acessa porta serial sozinho,
+# entao isto chama um encaminhador colocado em Tools\nmea (veja o README).
+Sub Nmea
+    b = RegRead("HKCU", "Software\MioUnlock", "Base")
+    p = RegRead("HKCU", "Software\MioUnlock", "GpsPorta")
+    v = RegRead("HKCU", "Software\MioUnlock", "GpsBaud")
+    If (FileExists(b & "\Tools\nmea\iniciar.mscr"))
+        CallScript(b & "\Tools\nmea\iniciar.mscr")
+    Else
+        Message("Aviso (nao e erro): ainda nao ha programa de GPS para USB em MioAutoRun\Tools\nmea. Vou tentar abrir o File Manager CE (plugin Serial, porta " & p & " a " & v & " baud).", "GPS")
+        Run(b & "\Apps\FileManagerCE\FileManCE.exe")
+    EndIf
+EndSub

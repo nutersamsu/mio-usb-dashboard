@@ -1,0 +1,12 @@
+# registro de execução local
+.superpowers/
+__pycache__/
+*.pyc
+# programas de terceiros do kit do cartão (não redistribuídos; ver README)
+sdcard/**/*.exe
+sdcard/**/*.EXE
+sdcard/**/*.dll
+sdcard/**/*.DLL
+sdcard/**/*.lng
+sdcard/**/*.tfx
+!sdcard/MioAutoRun/Apps/MioDash.exe
