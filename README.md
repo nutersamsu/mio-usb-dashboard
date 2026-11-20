@@ -21,6 +21,43 @@ mio-usb-dashboard/
 docs/telas-mio-v2.html        → desenho aprovado das telas (tema Neon)
 ```
 
+## Compatibilidade
+
+**Testado de verdade: só o Mio DigiWalker C250 Plus** (Windows CE 5.0 Core, ARM920T, 320x240).
+No Linux ele aparece como `3340:043a` "Yakumo Mio A701 DigiWalker": é só o nome que a lista de
+IDs USB dá para esse código, não outro modelo testado.
+
+### Requisitos do aparelho
+
+1. **Windows CE** (4.2, 5.0 ou 6.0). GPS com outro sistema **não funcionam** (TomTom, Garmin e
+   similares).
+2. **Processador ARM**, que é o caso de quase todo GPS com Windows CE.
+3. **Porta serial pela USB**: o aparelho precisa expor a USB como uma porta COM (no C250 é a
+   `COM9:`). Aparelhos que só ligam no PC como pendrive não servem.
+4. **Tela 320x240.** Em outra resolução o programa roda, mas o painel ocupa só um canto até o
+   desenho ser adaptado (as posições estão fixas em 320x240).
+
+### O que muda em outros aparelhos
+
+| Parte | Situação | Ajuste |
+|---|---|---|
+| `MioDash.exe` | Só usa a API básica do CE (`COREDLL`); deve rodar em ARM com CE 5/6 | Outra porta: `MioDash.exe COM3:` (ou `PORTA_SER` no `MioAutoRun.mscr`) |
+| Tela | Só 320x240 | Outras resoluções (480x272, 800x480) precisam de adaptação no `mio_dash.c` |
+| Liberar a porta | Fecha `MutDevice*.exe` (Mio/Mitac) e `repllog`/`rapiclnt`/`rnaapp` (ActiveSync) | Outras marcas podem ter outro programa segurando a porta |
+| Gatilho do cartão | No C250 o firmware roda `\Storage Card\Oscar91ADM.exe` | Os gatilhos `autorun`, `GOCE` e `2577\autorun` estão no kit, **não testados** |
+| Host (Linux/Proxmox) | Driver `ipaq` do kernel | Outro VID:PID precisa entrar no `setup_usb_serial.sh` |
+
+### Candidatos mais prováveis (não testados)
+
+- **Mio/Mitac com Windows CE da mesma época** (séries C, P e Moov): mesmo fabricante, mesmo tipo de
+  USB e o mesmo `MutDevice`.
+- **Navman, Medion, Becker, Airis e GPS genéricos chineses com Windows CE**: podem funcionar, mas
+  em cada um é preciso descobrir qual programa o firmware executa ao inserir o cartão e qual porta
+  COM é a da USB.
+
+Se testar em outro aparelho, abra uma issue com o modelo, a resolução, a porta COM e o que
+aconteceu.
+
 ## Arquivos de terceiros (não estão no repositório)
 
 O kit do cartão usa programas de terceiros para Windows CE que **não são redistribuídos aqui**.
