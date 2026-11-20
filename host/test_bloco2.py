@@ -95,7 +95,7 @@ class TestLinhaCabe(unittest.TestCase):
         self.assertLessEqual(len(campos), 56)
         self.assertLess(len(linha), 2048)
         nomes = [c.split("=", 1)[0] for c in campos]
-        for k in ("wok", "vm6", "sv9", "nst", "cs", "old"):
+        for k in ("wok", "vm6", "sv9", "cn", "cs", "old"):   # nst vai dentro de cn (bloco 3)
             self.assertIn(k, nomes)
         self.assertTrue(all(len(n) < 12 for n in nomes))      # Campo.k[12] no Mio
 

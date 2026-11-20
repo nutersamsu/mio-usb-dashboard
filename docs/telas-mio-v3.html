@@ -1,0 +1,395 @@
+<title>Painel do Mio v3</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: Mio simulado no topo (clique = próxima tela) com controles; abaixo todas as telas. Mesmo tema "sensor panel" da v2, mais 3 telas e alertas por nível. */
+:root {
+  --bg: #eceef2; --fg: #12141a; --muted: #5c6270; --card: #ffffff; --line: #d5d8e0; --accent: #7c3aed;
+  --novo: #0f766e;
+  --f-display: "Rajdhani", Tahoma, Verdana, sans-serif;
+  --f-body: "Inter", Tahoma, Verdana, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #08090c; --fg: #e6e8ee; --muted: #9096a6; --card: #121419; --line: #262a33; --accent: #a78bfa; --novo: #5eead4; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #08090c; --fg: #e6e8ee; --muted: #9096a6; --card: #121419; --line: #262a33; --accent: #a78bfa; --novo: #5eead4; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 26px; }
+h1 { font-family: var(--f-display); font-size: 2rem; margin: 0; letter-spacing: .02em; }
+h2 { font-family: var(--f-display); font-size: 1.25rem; margin: 0; }
+p { margin: 0; line-height: 1.55; max-width: 70ch; color: var(--muted); }
+.sim { display: grid; grid-template-columns: minmax(0, 640px) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 820px) { .sim { grid-template-columns: 1fr; } }
+.aparelho { background: #c9ccd3; border-radius: 26px; padding: 18px 18px 30px; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+.vidro { background: #000; border-radius: 10px; padding: 10px; }
+.aparelho svg { display: block; width: 100%; height: auto; cursor: pointer; }
+.marca { text-align: center; color: #6c707a; font: 600 13px Tahoma, Verdana, sans-serif; margin-top: 10px; letter-spacing: .08em; }
+.lado { display: grid; gap: 14px; min-width: 0; }
+.lado ul { margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }
+.lado b { color: var(--fg); }
+.ctrl { display: flex; flex-wrap: wrap; gap: 8px; }
+button { font: 600 14px var(--f-body); padding: 8px 13px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--card); color: var(--fg); cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
+button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+.tela { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; min-width: 0; align-content: start; }
+.tela svg { width: 100%; height: auto; display: block; }
+.tela h3 { margin: 0; font: 700 1.05rem var(--f-display); display: flex; gap: 8px; align-items: center; }
+.tela p { font-size: .9rem; }
+.selo { font: 700 .7rem var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--novo);
+  border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px; }
+.niveis { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; color: var(--muted); font-size: .92rem; line-height: 1.45; }
+.niveis b { color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { .aparelho { box-shadow: none; } }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Rajdhani:wght@500;600;700&display=swap">
+
+<div class="wrap">
+  <div>
+    <h1>Painel do Mio v3</h1>
+    <p>Proposta do bloco 3: o tema e as 4 telas da v2 continuam iguais. Entram 3 telas novas (Conexão, Segurança e Sistema) e o alerta passa a ter dois níveis: âmbar avisa sem som, vermelho é crítico e apita. Tamanho real 320×240, números de exemplo tirados do pve de hoje. Clique na tela para passar.</p>
+  </div>
+
+  <div class="sim">
+    <div class="aparelho">
+      <div class="vidro"><svg id="mio" viewBox="0 0 320 240" role="img" aria-label="Tela do Mio simulada"></svg></div>
+      <div class="marca">mio DigiWalker</div>
+    </div>
+    <div class="lado">
+      <h2>Simular situação</h2>
+      <div class="ctrl" id="niveis">
+        <button type="button" data-n="0" aria-pressed="true">Tudo OK</button>
+        <button type="button" data-n="1" aria-pressed="false">Alerta (DNS)</button>
+        <button type="button" data-n="2" aria-pressed="false">Crítico (internet)</button>
+      </div>
+      <h2>Telas na rotação</h2>
+      <div class="ctrl" id="escolha"></div>
+      <div class="ctrl"><button id="pausa" type="button">Pausar</button></div>
+      <div class="niveis">
+        <b>OK</b><span>Tema normal. Rotação das telas escolhidas.</span>
+        <b>Alerta</b><span>Tema âmbar e a tela de alerta entra na rotação. Sem som. Ex.: DNS, perda, latência, disco acima de 90 %, dado velho.</span>
+        <b>Crítico</b><span>Tema vermelho, 3 bips a cada 10 s. Um toque reconhece e silencia esse problema. Se surgir outro crítico, volta a apitar. Ex.: internet, gateway, Proxmox sem dados, CrowdSec parado, temperatura alta.</span>
+        <b>Info</b><span>Só fica registrado em "Últimos eventos" (tela Sistema). Ex.: a internet voltou.</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>Todas as telas</h2>
+  <div class="grade" id="grade"></div>
+</div>
+
+<script>
+const PALETAS = { neon: { a: "#ff4fa3", b: "#a855f7", c: "#3b82f6" } };
+const CRITICO = { a: "#b91c1c", b: "#ef4444", c: "#fca5a5" };
+const AVISO   = { a: "#c2410c", b: "#f59e0b", c: "#fcd34d" };
+const K = { bg: "#0a0b0e", pan: "#14161b", borda: "#343843", off: "#262931", txt: "#f1f3f7", mut: "#8a90a0",
+  ok: "#34d399", am: "#f59e0b", al: "#f87171" };
+const F = "Rajdhani, Tahoma, Verdana, sans-serif";
+let paleta = "neon", nivel = 0;
+let alerta = false;                      // compat. com o gerador de imagens da v2
+const P = () => nivel === 2 || alerta ? CRITICO : nivel === 1 ? AVISO : PALETAS[paleta];
+const N_TELAS = 7;
+
+// ---------- primitivas (iguais à v2)
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const mix = (x, y, t) => { const A = hex(x), B = hex(y); return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, "0")).join(""); };
+const grad = t => { const p = P(); return t < .5 ? mix(p.a, p.b, t * 2) : mix(p.b, p.c, (t - .5) * 2); };
+const T = (x, y, s, size, cor, peso = 600, anc = "start", esp = 0) =>
+  `<text x="${x}" y="${y}" font-family="${F}" font-size="${size}" font-weight="${peso}" fill="${cor}" text-anchor="${anc}" letter-spacing="${esp}">${s}</text>`;
+const R = (x, y, w, h, cor) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${cor}"/>`;
+const C = (x, y, r, cor) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${cor}"/>`;
+
+function painel(x, y, w, h, titulo, i = 0) {
+  const c = 6, p = P();
+  const pts = [[x + c, y], [x + w - c, y], [x + w, y + c], [x + w, y + h - c], [x + w - c, y + h], [x + c, y + h], [x, y + h - c], [x, y + c]];
+  let s = `<polygon points="${pts.map(q => q.join(",")).join(" ")}" fill="${K.pan}" stroke="${K.borda}" stroke-width="1"/>`;
+  s += R(x + w / 2 - w * .18, y + h - 2, w * .36, 1.5, mix(p.b, p.c, i));
+  if (titulo) {
+    const cx = x + w / 2, lw = titulo.length * 3.6 + 8;
+    s += R(cx - lw - 14, y + 9, 12, 1, p.b) + R(cx + lw + 2, y + 9, 12, 1, p.b);
+    s += T(cx, y + 12, titulo, 9, "#c8ccd6", 600, "middle", 1.2);
+  }
+  return s;
+}
+
+function arco(cx, cy, r, larg, frac, n = 36) {
+  let s = "";
+  const ini = 135, varr = 270, on = Math.round(frac * n);
+  for (let k = 0; k < n; k++) {
+    const a0 = (ini + k * varr / n + .9) * Math.PI / 180, a1 = (ini + (k + 1) * varr / n - .9) * Math.PI / 180;
+    const p = [[r, a0], [r, a1], [r - larg, a1], [r - larg, a0]].map(([rr, a]) => `${(cx + rr * Math.cos(a)).toFixed(1)},${(cy + rr * Math.sin(a)).toFixed(1)}`);
+    s += `<polygon points="${p.join(" ")}" fill="${k < on ? grad(k / (n - 1)) : K.off}"/>`;
+  }
+  return s;
+}
+
+function barra(x, y, w, h, frac, n = 24) {
+  let s = ""; const g = 1.5, sw = (w - g * (n - 1)) / n, on = Math.round(frac * n);
+  for (let k = 0; k < n; k++) s += R((x + k * (sw + g)).toFixed(1), y, sw.toFixed(1), h, k < on ? grad(k / (n - 1)) : K.off);
+  return s;
+}
+
+// pastilha de estado alinhada pela direita
+function pill(xd, y, texto, cor) {
+  const w = texto.length * 6.4 + 16;
+  return `<rect x="${xd - w}" y="${y}" width="${w}" height="17" rx="3" fill="${mix(K.pan, cor, .22)}" stroke="${cor}"/>`
+    + T(xd - w / 2, y + 12.5, texto, 10, cor, 700, "middle", 1);
+}
+
+function topo(titulo, idx, prog) {
+  const p = P();
+  let s = R(0, 0, 320, 240, K.bg);
+  s += `<polygon points="96,0 224,0 214,16 106,16" fill="#191c22" stroke="${K.borda}"/>`;
+  s += T(160, 12, titulo, 10, nivel ? p.c : "#dfe2ea", 700, "middle", 1.6);
+  s += T(6, 12, "20:05", 11, K.txt, 700);
+  for (let i = 0; i < N_TELAS; i++) s += R(40 + i * 7, 6, 5, 3, i === idx ? p.b : K.off);
+  s += R(234, 7, 30, 1.5, p.b) + T(314, 12, "×", 13, K.mut, 700, "end");
+  s += R(0, 18, 320, 1, K.off) + R(0, 18, 320 * prog, 1, p.c);
+  return s;
+}
+
+const DOWN = [22,30,28,45,60,52,38,41,70,88,94,76,58,62,71,80,66,54,72,94];
+const UP   = [3,4,4,6,8,6,5,5,9,12,10,8,7,6,8,9,7,6,8,9];
+function spark(x, y, w, h, dados, cor) {
+  const n = dados.length, pts = dados.map((v, i) => [x + i * w / (n - 1), y + h - v / 100 * h]);
+  return `<polygon points="${x},${y + h} ${pts.map(q => q.join(",")).join(" ")} ${x + w},${y + h}" fill="${mix(K.pan, cor, .28)}"/>`
+    + `<polyline points="${pts.map(q => q.join(",")).join(" ")}" fill="none" stroke="${cor}" stroke-width="1.5"/>`;
+}
+
+// ---------- situações de exemplo (o que o host manda em gw/net/dns/lat/per/nst/nlv)
+const SIT = [
+  { titulo: "INTERNET OK", rot: "OK", cor: K.ok, gw: 1, net: 1, dns: 1, lat: "6", per: "0",
+    problemas: [] },
+  { titulo: "DNS FALHANDO", rot: "ALERTA", cor: K.am, gw: 1, net: 1, dns: 0, lat: "7", per: "0",
+    problemas: [["DNS falhando", "há 1 min", 1]] },
+  { titulo: "INTERNET FORA", rot: "CRÍTICO", cor: K.al, gw: 1, net: 0, dns: null, lat: "–", per: "–",
+    problemas: [["Internet caiu (WAN ou provedor)", "há 3 min", 2], ["Disco do pve em 91%", "há 12 min", 1]] },
+];
+const corEstado = v => v === 1 ? K.ok : v === 0 ? K.al : K.off;
+
+// ---------- telas
+const TELAS = [
+  { nome: "Internet", desc: "Igual à v2: download em escala log, upload, consumo de hoje e do mês e gráfico de 10 minutos.",
+    svg: (i, pr) => {
+      const p = P();
+      let s = topo("INTERNET", i, pr);
+      s += painel(4, 23, 154, 213, "DOWNLOAD");
+      s += arco(81, 122, 66, 9, Math.log10(94.2) / 3);
+      s += T(81, 124, "94,2", 34, K.txt, 700, "middle");
+      s += T(81, 142, "MBIT/S", 10, p.a, 700, "middle", 1);
+      s += R(30, 158, 102, 1, mix(p.a, p.b, .5));
+      s += `<polygon points="44,175 52,175 48,167" fill="${p.c}"/>`;
+      s += T(57, 175, "UP", 10, K.mut, 700) + T(120, 175, "8,6", 12, K.txt, 700, "end") + T(122, 175, "Mb", 8, p.c, 700);
+      s += T(81, 196, "1 · 10 · 100 · 1000", 8, K.mut, 600, "middle");
+      s += T(81, 220, "pico 10 min  112", 9, K.mut, 600, "middle");
+      s += painel(162, 23, 154, 62, "HOJE", .3);
+      s += T(239, 58, "13,5 GB", 22, K.txt, 700, "middle");
+      s += T(205, 76, "↓ 12,4", 10, p.b, 700, "middle") + T(273, 76, "↑ 1,1", 10, p.c, 700, "middle");
+      s += painel(162, 89, 154, 70, "NOVEMBRO", .6);
+      s += T(239, 124, "331 GB", 22, K.txt, 700, "middle");
+      s += barra(172, 133, 134, 6, 20 / 30, 30);
+      s += T(239, 152, "dia 20 de 30", 9, K.mut, 600, "middle");
+      s += painel(162, 163, 154, 73, "10 MIN", .9);
+      s += spark(170, 180, 138, 46, DOWN, p.b) + spark(170, 180, 138, 46, UP, p.c);
+      return s;
+    } },
+  { nome: "Conexão", novo: true, desc: "Diagnóstico do bloco 2. Estado em uma frase com a pastilha OK, ALERTA ou CRÍTICO. O caminho mostra onde quebrou: pve → gateway (OPNsense) → internet → DNS. Embaixo, latência, perda e DNS com os limites.",
+    svg: (i, pr) => {
+      const p = P(), st = SIT[nivel];
+      let s = topo("CONEXÃO", i, pr);
+      s += painel(4, 23, 312, 46, "ESTADO");
+      s += T(16, 57, st.titulo, 20, K.txt, 700) + pill(306, 42, st.rot, st.cor);
+      s += painel(4, 73, 312, 78, "CAMINHO", .3);
+      const nos = [["PVE", "local", 1], ["GATEWAY", "0,2 ms", st.gw], ["INTERNET", st.net === 0 ? "sem resposta" : "1.1.1.1", st.net], ["DNS", st.dns === null ? "–" : st.dns ? "Unbound" : "falhou", st.dns]];
+      const xs = [44, 124, 204, 284];
+      for (let k = 0; k < 3; k++) {
+        const ok = nos[k][2] === 1 && nos[k + 1][2] === 1;
+        s += R(xs[k] + 10, 111, xs[k + 1] - xs[k] - 20, 2, ok ? mix(K.ok, K.pan, .35) : nos[k + 1][2] === 0 ? K.al : K.off);
+      }
+      nos.forEach(([n, v, e], k) => {
+        s += T(xs[k], 97, n, 9, K.mut, 700, "middle", 1);
+        s += `<circle cx="${xs[k]}" cy="${112}" r="8" fill="${mix(K.pan, corEstado(e), .25)}" stroke="${corEstado(e)}" stroke-width="2"/>`;
+        s += C(xs[k], 112, 3.5, corEstado(e));
+        s += T(xs[k], 139, v, 11, e === 0 ? K.al : K.txt, 700, "middle");
+      });
+      const lat = st.lat === "–" ? 0 : +st.lat;
+      s += painel(4, 155, 101, 81, "LATÊNCIA", 0);
+      s += T(52, 197, st.lat, 26, K.txt, 700, "end") + T(56, 197, "ms", 10, p.a, 700);
+      s += barra(14, 207, 81, 6, Math.min(1, lat / 300), 14) + T(54, 228, "limite 150", 8.5, K.mut, 600, "middle");
+      s += painel(109, 155, 101, 81, "PERDA", .5);
+      s += T(157, 197, st.per, 26, K.txt, 700, "end") + T(161, 197, "%", 12, p.a, 700);
+      s += barra(119, 207, 81, 6, 0, 14) + T(159, 228, "limite 5 %", 8.5, K.mut, 600, "middle");
+      s += painel(214, 155, 102, 81, "DNS", 1);
+      const dnsTxt = st.dns === null ? "–" : st.dns ? "OK" : "FALHA";
+      s += T(265, 197, dnsTxt, 22, st.dns === 0 ? K.am : st.dns ? K.ok : K.mut, 700, "middle");
+      s += T(265, 215, "3 falhas = alerta", 8.5, K.mut, 600, "middle");
+      s += T(265, 228, "não derruba internet", 8.5, K.mut, 600, "middle");
+      return s;
+    } },
+  { nome: "Servidor", desc: "Igual à v2: CPU com temperatura no centro, memória, disco, tempo ligado e ping até o OPNsense.",
+    svg: (i, pr) => {
+      const p = P();
+      let s = topo("SERVIDOR · PVE", i, pr);
+      s += painel(4, 23, 154, 152, "CPU");
+      s += arco(81, 104, 58, 8, .22);
+      s += T(78, 108, "39", 34, K.txt, 700, "middle") + T(100, 108, "°C", 10, K.txt, 600);
+      s += T(81, 128, "22 % LOAD", 11, p.a, 700, "middle", .5);
+      s += T(81, 162, "i7-8700 · 12 threads", 9, K.mut, 600, "middle");
+      s += painel(162, 23, 154, 152, "MEMÓRIA", .4);
+      s += arco(239, 104, 58, 8, .75);
+      s += T(239, 108, "17,4", 30, K.txt, 700, "middle");
+      s += T(239, 128, "75 % USADA", 11, p.b, 700, "middle", .5);
+      s += T(239, 162, "de 23,2 GB", 9, K.mut, 600, "middle");
+      s += painel(4, 179, 154, 57, "DISCO", .6);
+      s += T(14, 208, nivel === 2 ? "91 %" : "12 %", 15, nivel === 2 ? K.am : K.txt, 700) + T(148, 208, nivel === 2 ? "9 GB livres" : "84 GB livres", 9, K.mut, 600, "end");
+      s += barra(14, 216, 134, 7, nivel === 2 ? .91 : .12, 26);
+      s += painel(162, 179, 74, 57, "LIGADO", .8) + T(199, 216, "1d 10h", 14, K.txt, 700, "middle");
+      s += painel(240, 179, 76, 57, "PING", 1) + T(278, 216, "0,2 ms", 14, K.ok, 700, "middle");
+      return s;
+    } },
+  { nome: "Máquinas", desc: "Igual à v2: cada VM e contêiner com luz de estado, CPU e memória.",
+    svg: (i, pr) => {
+      const p = P();
+      let s = topo("MÁQUINAS · 3/5", i, pr);
+      const vms = [["server", "VM 100", 1, .10, "0,5 GB"], ["jellyfin", "CT 101", 1, .02, "0,4 GB"], ["proxorchestrator", "VM 102", 1, .01, "2,0 GB"],
+                   ["xpenology-teste", "VM 103", 0, 0, "desligada"], ["cegcc-temp", "CT 104", 0, 0, "desligada"]];
+      vms.forEach(([n, id, on, cpu, mem], k) => {
+        const y = 23 + k * 43;
+        s += painel(4, y, 312, 39, "", k / 4);
+        s += C(17, y + 19, 4.5, on ? K.ok : K.off);
+        s += T(28, y + 17, n, 13, on ? K.txt : K.mut, 700) + T(28, y + 31, id, 9, p.b, 700, "start", 1);
+        if (on) { s += barra(160, y + 12, 96, 6, Math.max(cpu, .02), 16) + T(160, y + 31, "CPU " + Math.round(cpu * 100) + "%", 9, K.mut, 600);
+                  s += T(308, y + 22, mem, 12, K.txt, 700, "end"); }
+        else s += T(308, y + 22, mem, 11, K.mut, 600, "end");
+      });
+      return s;
+    } },
+  { nome: "Serviços", desc: "Igual à v2: 9 painéis com luz verde ou vermelha, nome e tempo de resposta.",
+    svg: (i, pr) => {
+      let s = topo("SERVIÇOS · 9/9", i, pr);
+      [["Jellyfin", 1], ["Portainer", 1], ["Proxy NPM", 1], ["qBittorrent", 2], ["Seerr", 1], ["Navidrome", 1], ["Zabbix", 1], ["DNS", 1], ["CrowdSec", 1]].forEach(([n, ms], k) => {
+        const x = 4 + (k % 3) * 105, y = 23 + Math.floor(k / 3) * 72;
+        s += painel(x, y, 101, 68, "", (k % 3) / 2);
+        s += C(x + 14, y + 18, 5, K.ok);
+        s += T(x + 24, y + 22, n, 12, K.txt, 700);
+        s += T(x + 50, y + 50, ms + " ms", 16, K.txt, 700, "middle");
+      });
+      return s;
+    } },
+  { nome: "Segurança", novo: true, desc: "CrowdSec só leitura. Escudo com o estado (PROTEGIDO, PARADO ou SEM LEITURA), IPs bloqueados agora pelas detecções locais, quantos bloqueios novos em 24 h e o tamanho da lista da comunidade.",
+    svg: (i, pr) => {
+      const p = P(), cor = K.ok;
+      let s = topo("SEGURANÇA", i, pr);
+      s += painel(4, 23, 154, 152, "CROWDSEC");
+      s += `<polygon points="81,44 111,55 111,84 81,110 51,84 51,55" fill="${mix(K.pan, cor, .2)}" stroke="${cor}" stroke-width="2"/>`;
+      s += `<polyline points="67,77 77,88 96,64" fill="none" stroke="${cor}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      s += T(81, 136, "PROTEGIDO", 17, cor, 700, "middle", 1);
+      s += T(81, 154, "LAPI no ar", 9, K.mut, 600, "middle");
+      s += T(81, 166, "bouncer no OPNsense", 9, K.mut, 600, "middle");
+      s += painel(162, 23, 154, 152, "BLOQUEIOS", .4);
+      s += T(239, 98, "1", 52, K.txt, 700, "middle");
+      s += T(239, 118, "IP BLOQUEADO AGORA", 9.5, p.a, 700, "middle", .6);
+      s += R(184, 128, 110, 1, mix(p.a, p.b, .5));
+      s += T(239, 150, "3", 18, K.txt, 700, "end") + T(244, 150, "novos em 24 h", 10, K.mut, 600);
+      s += T(239, 166, "detecções locais e cscli", 8.5, K.mut, 600, "middle");
+      s += painel(4, 179, 154, 57, "LISTA DA COMUNIDADE", .7);
+      s += T(81, 216, "15.057", 17, K.txt, 700, "end") + T(86, 216, "IPs", 10, p.b, 700);
+      s += painel(162, 179, 154, 57, "LEITURA", 1);
+      s += T(239, 216, "há 40 s", 16, K.txt, 700, "middle");
+      return s;
+    } },
+  { nome: "Sistema", novo: true, desc: "Saúde do próprio painel: cabo USB e contadores da serial, idade dos dados, cada fonte (Proxmox, Zabbix, CrowdSec) com luz própria e os últimos eventos com hora e nível.",
+    svg: (i, pr) => {
+      const p = P();
+      let s = topo("SISTEMA", i, pr);
+      s += painel(4, 23, 154, 104, "USB SERIAL");
+      s += C(18, 48, 5, K.ok) + T(29, 52, "CONECTADO", 13, K.txt, 700);
+      s += T(14, 68, "COM9 · driver ipaq", 9, K.mut, 600);
+      [["linhas recebidas", "12.480"], ["enviadas", "2.096"], ["erros", "0"]].forEach(([a, b], k) => {
+        s += T(14, 88 + k * 14, a, 9.5, K.mut, 600) + T(148, 88 + k * 14, b, 10.5, K.txt, 700, "end");
+      });
+      s += painel(162, 23, 154, 104, "DADOS", .4);
+      s += T(239, 56, "há 2 s", 20, K.txt, 700, "middle");
+      s += T(239, 69, "última linha do pve", 8.5, K.mut, 600, "middle");
+      [["Proxmox", 1], ["Zabbix", 1], ["CrowdSec", 1]].forEach(([n, ok], k) => {
+        const y = 88 + k * 14;
+        s += C(176, y - 3, 3.5, ok ? K.ok : K.am) + T(185, y, n, 10, K.txt, 600) + T(306, y, ok ? "em dia" : "velho", 9.5, ok ? K.ok : K.am, 700, "end");
+      });
+      s += painel(4, 131, 312, 105, "ÚLTIMOS EVENTOS", .8);
+      const ev = nivel === 2
+        ? [["20:02", 2, "Internet caiu"], ["19:53", 1, "Disco do pve em 91%"], ["18:40", 0, "Internet voltou"], ["18:38", 2, "Internet caiu"]]
+        : nivel === 1
+        ? [["20:04", 1, "DNS falhando"], ["18:40", 0, "Internet voltou"], ["18:38", 2, "Internet caiu"], ["17:12", 0, "Serviço iniciado"]]
+        : [["18:40", 0, "Internet voltou"], ["18:38", 2, "Internet caiu"], ["17:12", 0, "Serviço iniciado"], ["16:05", 1, "Latência alta 180 ms"]];
+      const corN = [K.mut, K.am, K.al], rotN = ["INFO", "ALERTA", "CRÍTICO"];
+      ev.forEach(([h, n, t], k) => {
+        const y = 156 + k * 18;
+        s += T(14, y, h, 10, K.mut, 700) + R(46, y - 9, 3, 11, corN[n]);
+        s += T(55, y, t, 11, K.txt, 700) + T(306, y, rotN[n], 8.5, corN[n], 700, "end", .8);
+      });
+      s += T(160, 231, "MioDash 3.0 · host 2026.11", 8, K.mut, 600, "middle");
+      return s;
+    } },
+  { nome: "Alerta", novo: true, desc: "Entra na rotação quando há problema. Cada linha tem a cor do nível. Crítico: tema vermelho e bip, e um toque reconhece. Alerta: tema âmbar, sem som. Use o seletor no alto para ver os dois.",
+    svg: (i, pr) => {
+      const guard = nivel; if (!nivel) nivel = 2;
+      const st = SIT[nivel], p = P();
+      let s = topo(nivel === 2 ? "CRÍTICO" : "ALERTA", -1, pr);
+      s += painel(4, 23, 312, 213, "PROBLEMAS");
+      s += arco(160, 92, 42, 7, 1, 28) + T(160, 106, "!", 38, "#fff", 700, "middle");
+      st.problemas.forEach(([a, b, n], k) => {
+        const y = 146 + k * 36, cor = n === 2 ? K.al : K.am;
+        s += painel(14, y, 292, 30, "", .5) + R(15, y + 6, 3, 18, cor);
+        s += T(26, y + 20, a, 13, K.txt, 700) + T(296, y + 20, b, 10, p.c, 600, "end");
+      });
+      s += T(160, 228, nivel === 2 ? "toque para reconhecer e silenciar" : "aviso sem som", 10, p.c, 600, "middle");
+      nivel = guard;
+      return s;
+    } },
+];
+
+// ---------- simulador
+const mio = document.getElementById("mio");
+let escolhidas = [0, 1, 2, 3, 4, 5, 6];
+let atual = 0, inicio = performance.now(), pausado = false, pausaEm = 0;
+const ordem = () => (escolhidas.length ? escolhidas : [0]).concat(nivel ? [7] : []);
+function quadro(agora) {
+  const prog = pausado ? (pausaEm - inicio) / 10000 : (agora - inicio) / 10000;
+  if (!pausado && prog >= 1) proxima();
+  const id = ordem()[atual % ordem().length];
+  mio.innerHTML = TELAS[id].svg(id < 7 ? id : -1, Math.min(1, Math.max(0, prog)));
+  requestAnimationFrame(quadro);
+}
+function proxima() { atual = (atual + 1) % ordem().length; inicio = performance.now(); if (pausado) pausaEm = inicio; }
+mio.addEventListener("click", proxima);
+document.getElementById("pausa").addEventListener("click", e => {
+  pausado = !pausado;
+  if (pausado) pausaEm = performance.now(); else inicio = performance.now() - (pausaEm - inicio);
+  e.target.textContent = pausado ? "Continuar" : "Pausar";
+});
+const niveis = document.getElementById("niveis");
+niveis.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  nivel = +b.dataset.n;
+  niveis.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  atual = 0; inicio = performance.now(); grade();
+});
+const escolha = document.getElementById("escolha");
+escolha.innerHTML = TELAS.slice(0, 7).map((t, k) =>
+  `<button type="button" data-k="${k}" aria-pressed="true">${t.nome}</button>`).join("");
+escolha.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const k = +b.dataset.k, on = b.getAttribute("aria-pressed") !== "true";
+  b.setAttribute("aria-pressed", on);
+  escolhidas = on ? escolhidas.concat(k).sort((x, y) => x - y) : escolhidas.filter(x => x !== k);
+  atual = 0; inicio = performance.now();
+});
+function grade() {
+  document.getElementById("grade").innerHTML = TELAS.map((t, k) =>
+    `<div class="tela"><svg viewBox="0 0 320 240" role="img" aria-label="Tela ${t.nome}">${t.svg(k < 7 ? k : -1, .45)}</svg><h3>${k + 1}. ${t.nome}${t.novo ? ' <span class="selo">novo</span>' : ""}</h3><p>${t.desc}</p></div>`).join("");
+}
+grade();
+requestAnimationFrame(quadro);
+</script>

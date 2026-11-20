@@ -93,5 +93,11 @@
     "chave_arquivo": "/etc/mio-dashboard/crowdsec.key",
     "estado": "/var/lib/mio-dashboard/crowdsec-vistos.json",
     "comunidade": true
-  }
+  },
+  "eventos_arquivo": "/var/lib/mio-dashboard/eventos.json",
+  "maquinas_importantes": [
+    "server",
+    "jellyfin",
+    "proxorchestrator"
+  ]
 }

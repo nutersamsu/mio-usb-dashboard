@@ -16,6 +16,7 @@ Uso:
   python3 server.py --once                # imprime uma coleta e sai (teste)
 """
 import argparse
+import binascii
 import html
 import json
 import os
@@ -30,6 +31,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from eventos import Eventos  # noqa: E402
 from fonte_crowdsec import CrowdSec  # noqa: E402
 from fonte_internet import TesteInternet, em_silencio  # noqa: E402
 from fonte_rede import DiagnosticoRede, dns_auto  # noqa: E402
@@ -98,6 +100,21 @@ LEITURA_BOA = {"internet": lambda r: r.get("wok") == "1",
                "crowdsec": lambda r: r.get("cs") != "e"}
 NOMES_FONTE = {"pve": "Proxmox", "crowdsec": "CrowdSec"}   # zabbix ja tem "OPNsense sem dados"
 
+VERSAO = "2026.11.20"               # do host; vai no campo 'ver' (tela Sistema)
+
+# campos compostos: menos campos na linha (o Mio guarda no maximo 64)
+COMPOSTOS = {"cn": ("gw", "dns", "lat", "per", "nst", "nlv", "llat", "lper"),
+             "cs": ("cs", "csb", "csn", "csl", "csi")}
+
+
+def campos_alerta(lista):
+    """alv = niveis alinhados com alr; bip = ha critico que apita; aid = id do conjunto de criticos."""
+    criticos = sorted(c for c, _, bip, _ in lista if bip)
+    aid = "%04x" % (binascii.crc32(",".join(criticos).encode()) & 0xFFFF) if criticos else "-"
+    return {"alv": ";".join(str(n) for _, n, _, _ in lista),
+            "bip": "1" if criticos else "0", "aid": aid}
+
+
 EX_CONFIG = 78                      # erro de configuracao: o systemd nao reinicia (RestartPreventExitStatus)
 
 
@@ -153,6 +170,7 @@ class Coletor:
         self.crowdsec = (CrowdSec(cs["url"], cs["chave_arquivo"], cs.get("estado"),
                                   bool(cs.get("comunidade", True))) if cs else None)
         self._ok_em, self._inicio = {}, time.monotonic()
+        self.eventos = Eventos(cfg.get("eventos_arquivo"))
         api = cfg.get("proxmox_api")
         self.ler_pve = (fonte_pve.leitor_api(api["url"], api["token_arquivo"], api.get("ca"))
                         if api else fonte_pve._pvesh)
@@ -313,7 +331,16 @@ class Coletor:
             "ping_alvo": alvo or "-", "ping": lat,
             "servicos": servs, "pve": pve, "extra": extra, "_em": time.monotonic(),
         }
-        d["alertas"] = self.alertas(d)
+        niv = self.alertas_nivel(d)
+        d["alertas"] = [x[3] for x in niv]
+        ev = getattr(self, "eventos", None)
+        if ev:
+            ev.atualizar(niv, time.time())
+        extra.update(campos_alerta(niv), ev=ev.campo() if ev else "", ver=VERSAO,
+                     llat=str(cfg["limites"].get("latencia", 150)),
+                     lper=str(cfg["limites"].get("perda", 5)))
+        if "crowdsec" in self._ok_em:
+            extra["csi"] = str(int(time.monotonic() - self._ok_em["crowdsec"]))
         with self.trava:
             self.dados = d
         return d
@@ -378,46 +405,66 @@ class Coletor:
         return d
 
     def alertas(self, d, agora=None):
+        """So os textos (campo alr), criticos primeiro."""
+        return [x[3] for x in self.alertas_nivel(d, agora)]
+
+    def alertas_nivel(self, d, agora=None):
+        """[(chave, nivel, bip, texto)]: nivel 2 = critico, 1 = alerta. Bip so em critico.
+
+        A chave e estavel (o texto pode mudar, ex. minutos ou %), para nao repetir evento
+        nem voltar a apitar um alerta ja reconhecido."""
         agora = time.monotonic() if agora is None else agora
         L, a = self.cfg["limites"], []
+
+        def crit(chave, texto):
+            a.append((chave, 2, True, texto))
+
+        def aviso(chave, texto):
+            a.append((chave, 1, False, texto))
         ex = d.get("extra", {})
         if ex.get("net") == "0":
-            a.append("Internet caiu há %s min" % ex.get("netmin", "0"))
+            crit("internet", "Internet caiu há %s min" % ex.get("netmin", "0"))
+        if self._ping_falhas >= L["ping_falhas"]:
+            crit("gw", "Gateway sem resposta")
+        if d["temp"] is not None and d["temp"] > L["temp"]:
+            crit("temp", "TEMP %.0fC" % d["temp"])
+        if ex.get("cs") == "0":
+            crit("cs", "CrowdSec parado")
+        elif ex.get("cs") == "e":
+            aviso("cs", "CrowdSec sem leitura")
+        for f in filter(None, ex.get("old", "").split(",")):
+            if f in NOMES_FONTE:
+                (crit if f == "pve" else aviso)("old:" + f, "Sem dados: " + NOMES_FONTE[f])
         if ex.get("wok", "1") == "0":
             if not self._internet_falha_desde:
                 self._internet_falha_desde = agora
             if agora - self._internet_falha_desde > 120:
-                a.append("OPNsense sem dados")
+                aviso("wok", "OPNsense sem dados")
         else:
             self._internet_falha_desde = 0.0
-        if d["cpu"] is not None and d["cpu"] > L["cpu"]:
-            a.append("CPU %.0f%%" % d["cpu"])
-        if d["ram"] > L["ram"]:
-            a.append("RAM %.0f%%" % d["ram"])
-        if d["disco"] > L["disco"]:
-            a.append("DISCO %.0f%%" % d["disco"])
-        if d["temp"] is not None and d["temp"] > L["temp"]:
-            a.append("TEMP %.0fC" % d["temp"])
-        if self._ping_falhas >= L["ping_falhas"]:
-            a.append("Gateway sem resposta")
         if ex.get("net") != "0":                     # com a internet fora, o resto e consequencia
             if ex.get("dns") == "0":
-                a.append("DNS falhando")
+                aviso("dns", "DNS falhando")
             if ex.get("nst") == "perda":
-                a.append("Perda de pacotes %s%%" % ex.get("per", "?"))
+                aviso("perda", "Perda de pacotes %s%%" % ex.get("per", "?"))
             if ex.get("nst") == "lat":
-                a.append("Latência alta %s ms" % ex.get("lat", "?"))
-        if ex.get("cs") == "0":
-            a.append("CrowdSec parado")
-        elif ex.get("cs") == "e":
-            a.append("CrowdSec sem leitura")
-        for f in filter(None, ex.get("old", "").split(",")):
-            if f in NOMES_FONTE:
-                a.append("Sem dados: " + NOMES_FONTE[f])
+                aviso("lat", "Latência alta %s ms" % ex.get("lat", "?"))
+        if d["cpu"] is not None and d["cpu"] > L["cpu"]:
+            aviso("cpu", "CPU %.0f%%" % d["cpu"])
+        if d["ram"] > L["ram"]:
+            aviso("ram", "RAM %.0f%%" % d["ram"])
+        if d["disco"] > L["disco"]:
+            aviso("disco", "DISCO %.0f%%" % d["disco"])
+        importantes = set(self.cfg.get("maquinas_importantes", []))
+        for k in range(1, 7):
+            vm = ex.get("vm%d" % k, "")
+            partes = vm.split(";")
+            if len(partes) >= 3 and partes[0] in importantes and partes[2] != "1":
+                aviso("vm:" + partes[0], "VM %s desligada" % partes[0])
         for nome, ok in d["servicos"]:
             if not ok:
-                a.append(nome + " fora do ar")
-        return a
+                aviso("sv:" + nome, nome + " fora do ar")
+        return sorted(a, key=lambda x: -x[1])
 
     def loop(self):
         self.cpu()  # inicializa delta
@@ -473,7 +520,17 @@ def linha_serial(d):
         "png=" + n(d["ping"], "%.1f"),
         "alr=" + ";".join(d["alertas"]),
     ]
-    for k, v in sorted(d.get("extra", {}).items()):
+    extra = dict(d.get("extra", {}))
+    for nome, partes in COMPOSTOS.items():
+        if partes[0] in extra:
+            vals = [str(extra.pop(k, "")) for k in partes]
+            if nome == "cs" and vals[0] != "1":        # CrowdSec fora: sem numeros velhos
+                vals[1:4] = ["", "", ""]
+            extra[nome] = ";".join(vals)
+        else:
+            for k in partes:
+                extra.pop(k, None)
+    for k, v in sorted(extra.items()):
         if k not in NAO_ENVIAR:
             campos.append("%s=%s" % (k, v))
     texto = "|".join(c.replace("|", "/") for c in campos)
@@ -484,6 +541,8 @@ def loop_serial(coletor, cfg):
     import termios
     porta, baud = cfg["serial"]["porta"], cfg["serial"]["baud"]
     vel = getattr(termios, "B%d" % baud, termios.B115200)
+    ev = getattr(coletor, "eventos", None)
+    conectado = False
     while True:
         fd = None
         try:
@@ -495,6 +554,9 @@ def loop_serial(coletor, cfg):
             at[4] = at[5] = vel
             termios.tcsetattr(fd, termios.TCSANOW, at)
             sys.stderr.write("serial: enviando para %s\n" % porta)
+            if ev and not conectado:
+                ev.info("Mio conectado", time.time())
+            conectado = True
             while True:
                 d = coletor.atual()
                 if d and dados_frescos(d, time.monotonic()):
@@ -505,6 +567,9 @@ def loop_serial(coletor, cfg):
                 time.sleep(cfg["intervalo"])
         except Exception as e:
             sys.stderr.write("serial %s: %r (nova tentativa em 5 s)\n" % (porta, e))
+            if ev and conectado:
+                ev.info("Mio desconectado", time.time())
+            conectado = False
             time.sleep(5)
         finally:
             if fd is not None:
@@ -628,8 +693,9 @@ def main():
         col.cpu(); time.sleep(1); col.coletar(); time.sleep(1)
         d = col.coletar()
         print(json.dumps(d, indent=2, ensure_ascii=False))
-        print(linha_serial(d).decode().rstrip())
+        print(linha_serial(d).decode("cp1252").rstrip())
         return
+    col.eventos.info("Serviço iniciado", time.time())
     if cfg["serial"]["ativo"]:
         threading.Thread(target=loop_serial, args=(col, cfg), daemon=True).start()
     if not http_ativo(cfg):

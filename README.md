@@ -116,8 +116,23 @@ O `MioDash.exe` (deste projeto) já vem compilado em `sdcard/MioAutoRun/Apps/`.
 `wok` (1/0), `wd`/`wu` Mbit/s, `wg` 20 pares `down/up` 0–99, `wm` máximo do gráfico, `hd hu ht` hoje, `md mu mt` mês, `mes dia ndias`, `vm1..vm6 = nome;VM 100;1;18%;9,1 GB`, `nvm`, `sv1..sv9 = nome;1;ms`, `nsv`, `rot` (segundos por tela),
 `net` (1/0) e `som` (1 = pode apitar). A linha vai em cp1252 (página de código do Mio). Valores nunca têm `|`; linha ≤ 2048 bytes.
 
+### Telas e alertas v3 (bloco 3)
+Desenho: [`docs/telas-mio-v3.html`](docs/telas-mio-v3.html). São 7 telas na rotação: Internet, **Conexão**, Servidor, Máquinas, Serviços, **Segurança** e **Sistema**. A tela de alerta entra quando há problema.
+
+| Nível | Tema | Som | Exemplos |
+|---|---|---|---|
+| Crítico (`2`) | vermelho | 3 bips a cada 10 s; um toque reconhece | internet, gateway, Proxmox sem dados, CrowdSec parado, temperatura |
+| Alerta (`1`) | âmbar | nenhum | DNS, perda, latência, CPU, RAM, disco, serviço fora, VM importante desligada, Zabbix ou CrowdSec sem leitura |
+| Info (`0`) | n/d | nenhum | só em "Últimos eventos" (internet voltou, Mio conectado, serviço iniciado) |
+
+- **Reconhecer:** o host manda `aid`, que é o id do conjunto de críticos ativos. Um toque silencia esse conjunto. Se surgir outro crítico, o `aid` muda e o Mio volta a apitar. Quando os críticos acabam, o Mio toca o bip duplo de "voltou ao normal".
+- **Eventos:** um evento só nasce quando um alerta aparece ou some. Se o mesmo alerta voltar em menos de 5 min, não gera outro par de eventos. Ficam os últimos 20 em `/var/lib/mio-dashboard/eventos.json`, também no journal (`evento: CRÍTICO Internet caiu`). O Mio mostra os 4 últimos.
+- **VMs importantes:** `"maquinas_importantes": ["server", "jellyfin", "proxorchestrator"]` no `config.json`. Desligada vira alerta âmbar.
+
+Campos novos: `alv` (níveis alinhados com `alr`), `bip` (1/0), `aid`, `ev` (`hh:mm,nível,texto;...`), `ver`. O bloco 2 vai agrupado: `cn = gw;dns;lat;per;nst;nlv;limite_lat;limite_perda` e `cs = estado;bloqueados;novos24h;lista;idade_s`. A linha real tem 51 campos e cerca de 800 bytes (o Mio aceita 64 campos e 2048 bytes). O MioDash v2 continua funcionando com o host v3, porque `net`, `som` e `alr` não mudaram.
+
 ### Diagnóstico da internet, CrowdSec e dados velhos (bloco 2)
-O host já manda estes campos. Por enquanto o Mio só os mostra pela lista de alertas (`alr`); as telas novas vêm depois.
+O host manda estes valores agrupados em `cn` e `cs` (ver acima). O Mio v3 os mostra nas telas Conexão e Segurança.
 
 | Campo | Significado |
 |---|---|

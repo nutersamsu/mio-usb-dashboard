@@ -14,7 +14,9 @@
  *   arm-mingw32ce-gcc -O2 -Wall -o MioDash.exe mio_dash.c
  * Porta: argumento opcional, ex.  MioDash.exe COM9:
  *
- * Tema "sensor panel" Neon, 5 telas (internet, servidor, maquinas, servicos, alerta).
+ * Tema "sensor panel" Neon, 7 telas (internet, conexao, servidor, maquinas, servicos,
+ * seguranca, sistema) + alerta. Alerta ambar (aviso, sem som) ou vermelho (critico, bip;
+ * um toque reconhece). Desenho: docs/telas-mio-v3.html.
  */
 #include <windows.h>
 #include <string.h>
@@ -120,6 +122,8 @@ static int fechar_donos_da_porta(void)
 #define PROG_MS        250
 #define SEM_DADOS_MS   15000
 #define MAX_CAMPOS     64
+#define VERSAO         L"3.0"
+#define N_TELAS        7       /* sem contar a de alerta */
 #define LARG           320
 #define ALT            240
 
@@ -138,6 +142,8 @@ static int fechar_donos_da_porta(void)
 typedef struct { COLORREF a, b, c; } Paleta;
 static const Paleta PAL_NEON   = { RGB(0xff, 0x4f, 0xa3), RGB(0xa8, 0x55, 0xf7), RGB(0x3b, 0x82, 0xf6) };
 static const Paleta PAL_ALERTA = { RGB(0xb9, 0x1c, 0x1c), RGB(0xef, 0x44, 0x44), RGB(0xfc, 0xa5, 0xa5) };
+static const Paleta PAL_AVISO  = { RGB(0xc2, 0x41, 0x0c), RGB(0xf5, 0x9e, 0x0b), RGB(0xfc, 0xd3, 0x4d) };
+#define K_AM    RGB(0xf5, 0x9e, 0x0b)
 static const Paleta *g_pal = &PAL_NEON;
 
 typedef struct { char k[12]; char v[200]; } Campo;
@@ -146,7 +152,7 @@ static Campo   g_campos[MAX_CAMPOS];
 static int     g_ncampos = 0;
 static CRITICAL_SECTION g_cs;
 static DWORD   g_ultimo = 0;          /* GetTickCount da ultima linha valida */
-static int     g_vista = 0;           /* posicao na rotacao: 0 internet .. 4 alerta */
+static int     g_vista = 0;           /* posicao na rotacao: 0 internet .. 6 sistema, 7 alerta */
 static DWORD   g_inicio = 0;          /* GetTickCount de quando a tela atual comecou */
 static HWND    g_hwnd;
 static WCHAR   g_porta[16] = L"COM9:";
@@ -154,6 +160,7 @@ static volatile int g_rodando = 1;
 static char    g_status[64] = "abrindo porta";
 /* diagnostico da serial: bytes recebidos/enviados e ultimo erro */
 static volatile DWORD g_rx = 0, g_tx = 0, g_err = 0;
+static volatile DWORD g_linhas = 0, g_sinais = 0;   /* linhas validas e "MIO OLA" enviados */
 
 /* ------------------------------------------------------------ dados */
 static const char *val(const char *k)
@@ -191,6 +198,7 @@ static void interpretar(char *linha)
     memcpy(g_campos, novos, n * sizeof(Campo));
     g_ncampos = n;
     g_ultimo = GetTickCount();
+    g_linhas++;
     LeaveCriticalSection(&g_cs);
     PostMessage(g_hwnd, WM_DADOS, 0, 0);
 }
@@ -252,7 +260,7 @@ static DWORD WINAPI leitor(LPVOID arg)
                 char ping[32];
                 DWORD escritos = 0;
                 int n = _snprintf(ping, sizeof(ping), "MIO OLA %lu\r\n", (unsigned long)nping++);
-                if (WriteFile(h, ping, n, &escritos, NULL)) g_tx += escritos;
+                if (WriteFile(h, ping, n, &escritos, NULL)) { g_tx += escritos; g_sinais++; }
                 else g_err = GetLastError();
                 ultimo_ping = GetTickCount();
                 PostMessage(g_hwnd, WM_DADOS, 0, 0);
@@ -299,7 +307,8 @@ typedef struct { int hz, ms; } Nota;
 static PFN_PLAYSOUND g_play = NULL;
 static PFN_WAVEVOL   g_vol = NULL;
 static BYTE *g_som_alarme = NULL, *g_som_ok = NULL;
-static int   g_silenciado = 0, g_net_ant = 1;
+static int   g_bip_ant = 0;
+static char  g_aid_sil[8] = "";       /* conjunto de criticos ja reconhecido (toque) */
 static DWORD g_ultimo_bip = 0;
 
 static void pos32(BYTE *b, DWORD v) { b[0] = (BYTE)v; b[1] = (BYTE)(v >> 8); b[2] = (BYTE)(v >> 16); b[3] = (BYTE)(v >> 24); }
@@ -346,32 +355,52 @@ static void tocar(BYTE *wav)
     g_play((LPCWSTR)wav, NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 }
 
-/* estado vindo do host: internet fora (net=0) e se pode tocar (som=1) */
-static int internet_fora(int *pode_tocar)
+/* estado vindo do host: bip=1 ha critico que apita; aid identifica o conjunto;
+ * som=1 pode tocar agora (fora do horario de silencio). Host antigo sem 'bip':
+ * vale o alarme da v2 (net=0). */
+static int critico_ativo(char *aid, int *pode_tocar)
 {
-    int fora, semdados;
+    int ativo, semdados;
+    const char *b;
     EnterCriticalSection(&g_cs);
     semdados = (g_ncampos == 0) || (GetTickCount() - g_ultimo > SEM_DADOS_MS);
-    fora = !semdados && strcmp(val("net"), "0") == 0;
+    b = val("bip");
+    if (b[0] == '-') ativo = !semdados && strcmp(val("net"), "0") == 0;
+    else ativo = !semdados && strcmp(b, "1") == 0;
+    if (aid) { strncpy(aid, b[0] == '-' ? "net" : val("aid"), 7); aid[7] = 0; }
     if (pode_tocar) *pode_tocar = strcmp(val("som"), "1") == 0;
     LeaveCriticalSection(&g_cs);
-    return fora;
+    return ativo;
+}
+
+static int silenciado(void)
+{
+    char aid[8];
+    return critico_ativo(aid, NULL) && strcmp(aid, g_aid_sil) == 0;
 }
 
 static void verificar_alarme(void)
 {
-    int som = 0, fora = internet_fora(&som);
-    if (fora) {
-        if (!g_silenciado && som && GetTickCount() - g_ultimo_bip >= ALARME_MS) {
+    char aid[8];
+    int som = 0, ativo = critico_ativo(aid, &som);
+    if (ativo) {
+        if (strcmp(aid, g_aid_sil) != 0 && som && GetTickCount() - g_ultimo_bip >= ALARME_MS) {
             tocar(g_som_alarme);
             g_ultimo_bip = GetTickCount();
         }
-    } else if (!g_net_ant) {                          /* a internet voltou */
-        g_silenciado = 0;
+    } else if (g_bip_ant) {                           /* os criticos acabaram */
+        g_aid_sil[0] = 0;
         g_ultimo_bip = 0;
         if (som) tocar(g_som_ok);
     }
-    g_net_ant = !fora;
+    g_bip_ant = ativo;
+}
+
+/* toque: reconhece o conjunto de criticos atual (para de apitar ate surgir outro) */
+static void reconhecer(void)
+{
+    char aid[8];
+    if (critico_ativo(aid, NULL)) strcpy(g_aid_sil, aid);
 }
 
 /* ------------------------------------------------------------ desenho
@@ -426,8 +455,9 @@ static void circulo(HDC dc, int cx, int cy, int r, COLORREF c)
 #define ESQ 0
 #define MEIO 1
 #define DIR 2
-static HFONT g_fonte[24];
-static int   g_ftam[24], g_fneg[24], g_nfontes = 0;
+#define MAX_FONTES 48
+static HFONT g_fonte[MAX_FONTES];
+static int   g_ftam[MAX_FONTES], g_fneg[MAX_FONTES], g_nfontes = 0;
 
 static HFONT fonte(int tam, int negrito)
 {
@@ -440,7 +470,7 @@ static HFONT fonte(int tam, int negrito)
     lf.lfWeight = negrito ? FW_BOLD : FW_NORMAL;
     lf.lfQuality = ANTIALIASED_QUALITY;
     wcscpy(lf.lfFaceName, L"Tahoma");
-    if (g_nfontes == 24) return g_fonte[23];
+    if (g_nfontes == MAX_FONTES) return g_fonte[MAX_FONTES - 1];
     g_fonte[g_nfontes] = CreateFontIndirectW(&lf);
     g_ftam[g_nfontes] = tam;
     g_fneg[g_nfontes] = negrito;
@@ -495,6 +525,15 @@ static int tem_alerta(void)
 {
     const char *a = val("alr");
     return a[0] && strcmp(a, "-") != 0;
+}
+
+/* 0 nada, 1 aviso (ambar), 2 critico (vermelho). Host sem 'alv': todo alerta e critico. */
+static int nivel_alerta(void)
+{
+    const char *v = val("alv");
+    if (!tem_alerta()) return 0;
+    if (v[0] == '-') return 2;
+    return strchr(v, '2') ? 2 : 1;
 }
 
 /* titulo fixo + valor recebido (ASCII); dest com 48 WCHAR */
@@ -569,11 +608,11 @@ static void topo(HDC dc, const WCHAR *tit, int idx, int prog)
     ret(dc, 0, 0, LARG, ALT, K_BG);
     p[0].x = 96; p[0].y = 0; p[1].x = 224; p[1].y = 0; p[2].x = 214; p[2].y = 16; p[3].x = 106; p[3].y = 16;
     poli(dc, p, 4, K_ABA, K_BORDA);
-    txt(dc, 10, 1, g_pal == &PAL_ALERTA ? g_pal->c : RGB(0xdf, 0xe2, 0xea), 160, 12, tit, MEIO);
+    txt(dc, 10, 1, g_pal != &PAL_NEON ? g_pal->c : RGB(0xdf, 0xe2, 0xea), 160, 12, tit, MEIO);
     strncpy(hora, val("h"), 5);
     hora[5] = 0;
     txta(dc, 11, 1, K_TXT, 6, 12, hora, ESQ);
-    for (i = 0; i < 4; i++) ret(dc, 40 + i * 9, 6, 6, 3, i == idx ? g_pal->b : K_OFF);
+    for (i = 0; i < N_TELAS; i++) ret(dc, 40 + i * 7, 6, 5, 3, i == idx ? g_pal->b : K_OFF);
     ret(dc, 234, 7, 30, 2, g_pal->b);
     txt(dc, 13, 1, K_MUT, 314, 13, L"\x00D7", DIR);
     ret(dc, 0, 18, LARG, 1, K_OFF);
@@ -684,7 +723,7 @@ static void tela_servidor(HDC dc, int prog)
     char s[64], up[16];
     double ramu = num(val("ramu")), ramt = num(val("ramt")), png = num(val("png"));
     int cpu = atoi(val("cpu")), ram = atoi(val("ram")), dsk = atoi(val("dsk")), i;
-    topo(dc, L"SERVIDOR \x00B7 PVE", 1, prog);
+    topo(dc, L"SERVIDOR \x00B7 PVE", 2, prog);
 
     painel(dc, 4, 23, 154, 152, L"CPU", 0);
     arco(dc, 81, 104, 58, 8, cpu * 10, 36);
@@ -735,7 +774,7 @@ static void tela_maquinas(HDC dc, int prog)
     int k, n = 0, alt;
     for (k = 1; k <= 6; k++) { sprintf(chave, "vm%d", k); if (val(chave)[0] != '-') n = k; }
     titulo_com(tit, L"M\x00C1QUINAS \x00B7 ", val("nvm"));
-    topo(dc, tit, 2, prog);
+    topo(dc, tit, 3, prog);
     if (n == 0) { txt(dc, 14, 1, K_MUT, 160, 130, L"sem dados do Proxmox", MEIO); return; }
     alt = n > 5 ? 36 : 43;
     for (k = 0; k < n; k++) {
@@ -772,7 +811,7 @@ static void tela_servicos(HDC dc, int prog)
     char chave[16], nome[32], on[4], ms[8], s[16];
     int k;
     titulo_com(tit, L"SERVI\x00C7OS \x00B7 ", val("nsv"));
-    topo(dc, tit, 3, prog);
+    topo(dc, tit, 4, prog);
     for (k = 0; k < 9; k++) {
         int x = 4 + (k % 3) * 105, y = 23 + (k / 3) * 72, ok;
         sprintf(chave, "sv%d", k + 1);
@@ -789,14 +828,299 @@ static void tela_servicos(HDC dc, int prog)
     }
 }
 
+/* ---- ajudantes das telas v3 */
+static COLORREF cor_estado(int e) { return e == 1 ? K_OK : e == 0 ? K_AL : K_OFF; }
+
+/* anel de estado: 1 ok, 0 falha, -1 desconhecido */
+static void anel(HDC dc, int cx, int cy, int e)
+{
+    COLORREF c = cor_estado(e);
+    circulo(dc, cx, cy, 8, c);
+    circulo(dc, cx, cy, 6, mix(K_PAN, c, 64));
+    circulo(dc, cx, cy, 3, c);
+}
+
+static int largura(HDC dc, int tam, int neg, const WCHAR *s)
+{
+    SIZE sz;
+    SelectObject(dc, fonte(tam, neg));
+    GetTextExtentPoint32W(dc, s, wcslen(s), &sz);
+    return sz.cx;
+}
+
+/* pastilha de estado alinhada pela direita em xd */
+static void pastilha(HDC dc, int xd, int y, const WCHAR *s, COLORREF c)
+{
+    POINT p[4];
+    int w = largura(dc, 10, 1, s) + 16;
+    p[0].x = xd - w; p[0].y = y; p[1].x = xd; p[1].y = y;
+    p[2].x = xd; p[2].y = y + 17; p[3].x = xd - w; p[3].y = y + 17;
+    poli(dc, p, 4, mix(K_PAN, c, 56), c);
+    txt(dc, 10, 1, c, xd - w / 2, y + 13, s, MEIO);
+}
+
+static void traco(HDC dc, POINT *p, int n, COLORREF c, int larg)
+{
+    HPEN pen = CreatePen(PS_SOLID, larg, c);
+    HGDIOBJ op = SelectObject(dc, pen);
+    Polyline(dc, p, n);
+    SelectObject(dc, op);
+    DeleteObject(pen);
+}
+
+/* segundos -> "ha 40 s" / "ha 3 min" / "ha 2 h" (cp1252) */
+static void idade(char *dest, int tam, long s)
+{
+    if (s < 0) _snprintf(dest, tam, "-");
+    else if (s < 120) _snprintf(dest, tam, "h\xE1 %ld s", s);
+    else if (s < 7200) _snprintf(dest, tam, "h\xE1 %ld min", s / 60);
+    else _snprintf(dest, tam, "h\xE1 %ld h", s / 3600);
+    dest[tam - 1] = 0;
+}
+
+/* "15057" -> "15.057" */
+static void milhar(char *dest, int tam, const char *n)
+{
+    int len = strlen(n), i, j = 0;
+    for (i = 0; i < len && j < tam - 2; i++) {
+        dest[j++] = n[i];
+        if ((len - i - 1) % 3 == 0 && i < len - 1) dest[j++] = '.';
+    }
+    dest[j] = 0;
+}
+
+static void virgula(char *s) { for (; *s; s++) if (*s == '.') *s = ','; }
+
+/* ---- CONEXAO: diagnostico do host (campo cn = gw;dns;lat;per;nst;nlv;llat;lper) */
+static void tela_conexao(HDC dc, int prog)
+{
+    static const int xs[4] = { 44, 124, 204, 284 };
+    static const WCHAR *nomes[4] = { L"PVE", L"GATEWAY", L"INTERNET", L"DNS" };
+    char cn[96], gw[4], dns[4], lat[12], per[8], nst[12], nlv[4], llat[8], lper[8], s[48];
+    const WCHAR *titulo, *rotulo;
+    COLORREF cor;
+    int e[4], nv, k;
+    double vlat, vper;
+    strncpy(cn, val("cn"), sizeof(cn) - 1);
+    cn[sizeof(cn) - 1] = 0;
+    topo(dc, L"CONEX\x00C3O", 1, prog);
+    if (cn[0] == '-') {
+        painel(dc, 4, 23, 312, 213, L"CONEX\x00C3O", 128);
+        txt(dc, 16, 1, g_pal->a, 160, 120, L"sem diagn\x00F3stico", MEIO);
+        txt(dc, 10, 0, K_MUT, 160, 142, L"o host ainda n\x00E3o mandou", MEIO);
+        return;
+    }
+    parte(cn, 0, gw, sizeof(gw));   parte(cn, 1, dns, sizeof(dns));
+    parte(cn, 2, lat, sizeof(lat)); parte(cn, 3, per, sizeof(per));
+    parte(cn, 4, nst, sizeof(nst)); parte(cn, 5, nlv, sizeof(nlv));
+    parte(cn, 6, llat, sizeof(llat)); parte(cn, 7, lper, sizeof(lper));
+    nv = atoi(nlv);
+    e[0] = 1;
+    e[1] = gw[0] == '1' ? 1 : 0;
+    e[2] = e[1] != 1 ? -1 : (strcmp(val("net"), "0") == 0 ? 0 : 1);
+    e[3] = e[2] != 1 ? -1 : (dns[0] == '1' ? 1 : 0);
+    if (!strcmp(nst, "gw")) titulo = L"GATEWAY FORA";
+    else if (!strcmp(nst, "net")) titulo = L"INTERNET FORA";
+    else if (!strcmp(nst, "dns")) titulo = L"DNS FALHANDO";
+    else if (!strcmp(nst, "perda")) titulo = L"PERDA DE PACOTES";
+    else if (!strcmp(nst, "lat")) titulo = L"LAT\x00CANCIA ALTA";
+    else titulo = L"INTERNET OK";
+    cor = nv == 2 ? K_AL : nv == 1 ? K_AM : K_OK;
+    rotulo = nv == 2 ? L"CR\x00CDTICO" : nv == 1 ? L"ALERTA" : L"OK";
+
+    painel(dc, 4, 23, 312, 46, L"ESTADO", 0);
+    txt(dc, 20, 1, K_TXT, 16, 57, titulo, ESQ);
+    pastilha(dc, 306, 42, rotulo, cor);
+
+    painel(dc, 4, 73, 312, 78, L"CAMINHO", 77);
+    for (k = 0; k < 3; k++) {
+        COLORREF c = (e[k] == 1 && e[k + 1] == 1) ? mix(K_OK, K_PAN, 90) : e[k + 1] == 0 ? K_AL : K_OFF;
+        ret(dc, xs[k] + 10, 111, xs[k + 1] - xs[k] - 20, 2, c);
+    }
+    for (k = 0; k < 4; k++) {
+        txt(dc, 9, 1, K_MUT, xs[k], 97, nomes[k], MEIO);
+        anel(dc, xs[k], 112, e[k]);
+    }
+    txt(dc, 11, 1, K_TXT, xs[0], 139, L"local", MEIO);
+    if (e[1] == 1) {
+        _snprintf(s, sizeof(s), "%s ms", val("png"));
+        virgula(s);
+        txta(dc, 11, 1, K_TXT, xs[1], 139, s, MEIO);
+    } else txt(dc, 11, 1, K_AL, xs[1], 139, L"sem resposta", MEIO);
+    if (e[2] == 1) txt(dc, 11, 1, K_TXT, xs[2], 139, L"responde", MEIO);
+    else if (e[2] == 0) txt(dc, 11, 1, K_AL, xs[2], 139, L"sem resposta", MEIO);
+    else txt(dc, 11, 1, K_MUT, xs[2], 139, L"\x2013", MEIO);
+    if (e[3] == 1) txt(dc, 11, 1, K_TXT, xs[3], 139, L"resolve", MEIO);
+    else if (e[3] == 0) txt(dc, 11, 1, K_AM, xs[3], 139, L"falhou", MEIO);
+    else txt(dc, 11, 1, K_MUT, xs[3], 139, L"\x2013", MEIO);
+
+    vlat = num(lat);
+    painel(dc, 4, 155, 101, 81, L"LAT\x00CANCIA", 0);
+    if (vlat < 0) txt(dc, 26, 1, K_MUT, 52, 197, L"\x2013", DIR);
+    else { _snprintf(s, sizeof(s), "%.0f", vlat); txta(dc, 26, 1, K_TXT, 52, 197, s, DIR); }
+    txt(dc, 10, 1, g_pal->a, 56, 197, L"ms", ESQ);
+    barra(dc, 14, 207, 81, 6, vlat < 0 ? 0 : (vlat >= 300 ? 1000 : (int)(vlat * 1000 / 300)), 14);
+    _snprintf(s, sizeof(s), "limite %s", llat);
+    txta(dc, 9, 0, K_MUT, 54, 228, s, MEIO);
+
+    vper = num(per);
+    painel(dc, 109, 155, 101, 81, L"PERDA", 128);
+    if (vper < 0) txt(dc, 26, 1, K_MUT, 157, 197, L"\x2013", DIR);
+    else { _snprintf(s, sizeof(s), "%.0f", vper); txta(dc, 26, 1, K_TXT, 157, 197, s, DIR); }
+    txt(dc, 12, 1, g_pal->a, 161, 197, L"%", ESQ);
+    barra(dc, 119, 207, 81, 6, vper < 0 ? 0 : (vper >= 100 ? 1000 : (int)(vper * 10)), 14);
+    _snprintf(s, sizeof(s), "limite %s %%", lper);
+    txta(dc, 9, 0, K_MUT, 159, 228, s, MEIO);
+
+    painel(dc, 214, 155, 102, 81, L"DNS", 256);
+    if (e[3] == 1) txt(dc, 22, 1, K_OK, 265, 197, L"OK", MEIO);
+    else if (e[3] == 0) txt(dc, 22, 1, K_AM, 265, 197, L"FALHA", MEIO);
+    else txt(dc, 22, 1, K_MUT, 265, 197, L"\x2013", MEIO);
+    txt(dc, 9, 0, K_MUT, 265, 215, L"3 falhas = alerta", MEIO);
+    txt(dc, 9, 0, K_MUT, 265, 228, L"n\x00E3o derruba internet", MEIO);
+}
+
+/* ---- SEGURANCA: CrowdSec (campo cs = estado;bloqueados;novos24h;lista;idade_s) */
+static void tela_seguranca(HDC dc, int prog)
+{
+    char cs[96], st[4], b[16], nn[16], l[16], idd[16], s[48];
+    const WCHAR *estado, *l1, *l2;
+    COLORREF cor;
+    POINT esc[7];
+    int ok;
+    strncpy(cs, val("cs"), sizeof(cs) - 1);
+    cs[sizeof(cs) - 1] = 0;
+    topo(dc, L"SEGURAN\x00C7" L"A", 5, prog);
+    parte(cs, 0, st, sizeof(st)); parte(cs, 1, b, sizeof(b)); parte(cs, 2, nn, sizeof(nn));
+    parte(cs, 3, l, sizeof(l));   parte(cs, 4, idd, sizeof(idd));
+    if (cs[0] == '-') { cor = K_MUT; estado = L"SEM CROWDSEC"; l1 = L"n\x00E3o configurado"; l2 = L"no host"; }
+    else if (st[0] == '1') { cor = K_OK; estado = L"PROTEGIDO"; l1 = L"LAPI no ar"; l2 = L"s\x00F3 leitura"; }
+    else if (st[0] == '0') { cor = K_AL; estado = L"PARADO"; l1 = L"LAPI fora do ar"; l2 = L"sem novas detec\x00E7\x00F5" L"es"; }
+    else { cor = K_AM; estado = L"SEM LEITURA"; l1 = L"LAPI no ar"; l2 = L"chave ou rede falhou"; }
+    ok = cs[0] != '-' && st[0] == '1';
+
+    painel(dc, 4, 23, 154, 152, L"CROWDSEC", 0);
+    esc[0].x = 81;  esc[0].y = 44;  esc[1].x = 111; esc[1].y = 55; esc[2].x = 111; esc[2].y = 84;
+    esc[3].x = 81;  esc[3].y = 110; esc[4].x = 51;  esc[4].y = 84; esc[5].x = 51;  esc[5].y = 55;
+    poli(dc, esc, 6, mix(K_PAN, cor, 52), cor);
+    esc[6] = esc[0];
+    traco(dc, esc, 7, cor, 2);
+    if (ok) {
+        POINT v[3];
+        v[0].x = 67; v[0].y = 77; v[1].x = 77; v[1].y = 88; v[2].x = 96; v[2].y = 64;
+        traco(dc, v, 3, cor, 4);
+    } else txt(dc, 34, 1, cor, 81, 96, cs[0] == '-' ? L"?" : L"!", MEIO);
+    txt(dc, wcslen(estado) > 10 ? 13 : 17, 1, cor, 81, 136, estado, MEIO);
+    txt(dc, 9, 0, K_MUT, 81, 154, l1, MEIO);
+    txt(dc, 9, 0, K_MUT, 81, 166, l2, MEIO);
+
+    painel(dc, 162, 23, 154, 152, L"BLOQUEIOS", 102);
+    if (ok) {
+        txta(dc, 52, 1, K_TXT, 239, 98, b, MEIO);
+        txt(dc, 9, 1, g_pal->a, 239, 118, atoi(b) == 1 ? L"IP BLOQUEADO AGORA" : L"IPS BLOQUEADOS AGORA", MEIO);
+        ret(dc, 184, 128, 110, 1, mix(g_pal->a, g_pal->b, 128));
+        txta(dc, 18, 1, K_TXT, 239, 150, nn, DIR);
+        txt(dc, 10, 0, K_MUT, 244, 150, L"novos em 24 h", ESQ);
+        txt(dc, 9, 0, K_MUT, 239, 166, L"detec\x00E7\x00F5" L"es locais e cscli", MEIO);
+    } else {
+        txt(dc, 34, 1, K_MUT, 239, 104, L"\x2013", MEIO);
+        txt(dc, 10, 0, K_MUT, 239, 132, L"sem leitura agora", MEIO);
+    }
+
+    painel(dc, 4, 179, 154, 57, L"LISTA DA COMUNIDADE", 179);
+    if (ok && l[0] && l[0] != '-') {
+        milhar(s, sizeof(s), l);
+        txta(dc, 17, 1, K_TXT, 81, 216, s, DIR);
+        txt(dc, 10, 1, g_pal->b, 86, 216, L"IPs", ESQ);
+    } else txt(dc, 15, 1, K_MUT, 81, 216, L"\x2013", MEIO);
+
+    painel(dc, 162, 179, 154, 57, L"LEITURA", 256);
+    if (idd[0]) { idade(s, sizeof(s), atol(idd)); txta(dc, 16, 1, K_TXT, 239, 216, s, MEIO); }
+    else txt(dc, 15, 1, K_MUT, 239, 216, L"\x2013", MEIO);
+}
+
+/* ---- SISTEMA: serial, idade dos dados, fontes e ultimos eventos (ev = hh:mm,n,texto;...) */
+static void fonte_linha(HDC dc, int y, const WCHAR *nome, int estado)
+{
+    /* estado: 1 em dia, 0 velho, 2 parado, -1 nao configurado */
+    COLORREF c = estado == 1 ? K_OK : estado == 0 ? K_AM : estado == 2 ? K_AL : K_OFF;
+    const WCHAR *t = estado == 1 ? L"em dia" : estado == 0 ? L"velho" : estado == 2 ? L"parado" : L"\x2013";
+    circulo(dc, 176, y - 4, 3, c);
+    txt(dc, 10, 0, K_TXT, 185, y, nome, ESQ);
+    txt(dc, 9, 1, c, 306, y, t, DIR);
+}
+
+static void tela_sistema(HDC dc, int prog)
+{
+    char s[64], ev[200], *tok, *prox, old[48], cs = val("cs")[0];
+    int k, y, n = 0;
+    topo(dc, L"SISTEMA", 6, prog);
+
+    painel(dc, 4, 23, 154, 104, L"USB SERIAL", 0);
+    circulo(dc, 18, 48, 5, K_OK);
+    txt(dc, 13, 1, K_TXT, 29, 52, L"CONECTADO", ESQ);
+    _snprintf(s, sizeof(s), "%S \xB7 115200", g_porta);
+    txta(dc, 9, 0, K_MUT, 14, 68, s, ESQ);
+    for (k = 0; k < 3; k++) {
+        static const WCHAR *rot[3] = { L"linhas recebidas", L"sinais enviados", L"\x00FAltimo erro" };
+        y = 88 + k * 14;
+        if (k == 0) _snprintf(s, sizeof(s), "%lu", (unsigned long)g_linhas);
+        else if (k == 1) _snprintf(s, sizeof(s), "%lu", (unsigned long)g_sinais);
+        else if (g_err) _snprintf(s, sizeof(s), "c\xF3" "digo %lu", (unsigned long)g_err);
+        else _snprintf(s, sizeof(s), "nenhum");
+        txt(dc, 9, 0, K_MUT, 14, y, rot[k], ESQ);
+        txta(dc, 10, 1, K_TXT, 148, y, s, DIR);
+    }
+
+    painel(dc, 162, 23, 154, 104, L"DADOS", 102);
+    idade(s, sizeof(s), (long)((GetTickCount() - g_ultimo) / 1000));
+    txta(dc, 20, 1, K_TXT, 239, 56, s, MEIO);
+    txt(dc, 9, 0, K_MUT, 239, 69, L"\x00FAltima linha do pve", MEIO);
+    strncpy(old, val("old"), sizeof(old) - 1);
+    old[sizeof(old) - 1] = 0;
+    fonte_linha(dc, 88, L"Proxmox", strstr(old, "pve") ? 0 : 1);
+    fonte_linha(dc, 102, L"Zabbix", (strstr(old, "zabbix") || strcmp(val("wok"), "1") != 0) ? 0 : 1);
+    fonte_linha(dc, 116, L"CrowdSec", cs == '-' ? -1 : cs == '0' ? 2 : (cs == 'e' || strstr(old, "crowdsec")) ? 0 : 1);
+
+    painel(dc, 4, 131, 312, 105, L"\x00DALTIMOS EVENTOS", 205);
+    strncpy(ev, val("ev"), sizeof(ev) - 1);
+    ev[sizeof(ev) - 1] = 0;
+    y = 156;
+    for (tok = ev; ev[0] != '-' && tok && *tok && n < 4; tok = prox, n++) {
+        char hora[8], niv[4], texto[40];
+        COLORREF c;
+        prox = strchr(tok, ';');
+        if (prox) *prox++ = 0;
+        {   /* "hh:mm,n,texto" -> troca ',' por ';' para usar parte() */
+            char *q;
+            for (q = tok; *q; q++) if (*q == ',') *q = ';';
+        }
+        parte(tok, 0, hora, sizeof(hora));
+        parte(tok, 1, niv, sizeof(niv));
+        parte(tok, 2, texto, sizeof(texto));
+        c = niv[0] == '2' ? K_AL : niv[0] == '1' ? K_AM : K_MUT;
+        txta(dc, 10, 1, K_MUT, 14, y, hora, ESQ);
+        ret(dc, 46, y - 9, 3, 11, c);
+        txta(dc, 11, 1, K_TXT, 55, y, texto, ESQ);
+        txt(dc, 8, 1, c, 306, y, niv[0] == '2' ? L"CR\x00CDTICO" : niv[0] == '1' ? L"ALERTA" : L"INFO", DIR);
+        y += 18;
+    }
+    if (n == 0) txt(dc, 10, 0, K_MUT, 160, 180, L"nenhum evento ainda", MEIO);
+    _snprintf(s, sizeof(s), "MioDash %S \xB7 host %s", VERSAO, val("ver"));
+    txta(dc, 8, 0, K_MUT, 160, 231, s, MEIO);
+}
+
 static void tela_alerta(HDC dc, int prog)
 {
-    char lista[200], *tok, *p;
-    int n = 0, y;
-    topo(dc, L"ALERTA", -1, prog);
+    char lista[200], niveis[64], nv[4], *tok, *p;
+    const WCHAR *rodape;
+    int n = 0, y, i = 0, crit = nivel_alerta() == 2;
+    topo(dc, crit ? L"CR\x00CDTICO" : L"ALERTA", -1, prog);
     painel(dc, 4, 23, 312, 213, L"PROBLEMAS", 128);
     strncpy(lista, val("alr"), sizeof(lista) - 1);
     lista[sizeof(lista) - 1] = 0;
+    strncpy(niveis, val("alv"), sizeof(niveis) - 1);
+    niveis[sizeof(niveis) - 1] = 0;
     for (p = lista; *p; p++) if (*p == ';') n++;
     n++;
     if (n <= 2) {
@@ -804,19 +1128,21 @@ static void tela_alerta(HDC dc, int prog)
         txt(dc, 34, 1, RGB(255, 255, 255), 160, 112, L"!", MEIO);
         y = 156;
     } else y = 34;
-    for (tok = lista; tok && *tok && y < 196; tok = p) {
+    for (tok = lista; tok && *tok && y < 196; tok = p, i++) {
         p = strchr(tok, ';');
         if (p) *p++ = 0;
+        parte(niveis, i, nv, sizeof(nv));
         painel(dc, 14, y, 292, 30, NULL, 128);
+        ret(dc, 15, y + 6, 3, 18, (nv[0] == '1') ? K_AM : K_AL);   /* sem 'alv' = critico */
         txta(dc, 13, 1, K_TXT, 26, y + 20, tok, ESQ);
         y += 36;
     }
-    if (strcmp(val("net"), "0") == 0) {               /* situacao do alarme sonoro */
-        const WCHAR *s = g_silenciado ? L"alarme silenciado"
-                       : strcmp(val("som"), "1") != 0 ? L"sil\x00EAncio (23h \x00E0s 7h)"
-                       : L"toque na tela para silenciar";
-        txt(dc, 10, 0, g_pal->c, 160, 226, s, MEIO);
-    }
+    if (critico_ativo(NULL, NULL))
+        rodape = silenciado() ? L"alarme reconhecido"
+               : strcmp(val("som"), "1") != 0 ? L"sil\x00EAncio (23h \x00E0s 7h)"
+               : L"toque para reconhecer e silenciar";
+    else rodape = L"aviso sem som";
+    txt(dc, 10, 0, g_pal->c, 160, 226, rodape, MEIO);
 }
 
 static void tela_sem_dados(HDC dc)
@@ -837,7 +1163,7 @@ static void tela_sem_dados(HDC dc)
     txt(dc, 10, 0, K_MUT, 160, 214, L"toque no \x00D7 para sair", MEIO);
 }
 
-static int n_telas(void) { return tem_alerta() ? 5 : 4; }
+static int n_telas(void) { return tem_alerta() ? N_TELAS + 1 : N_TELAS; }
 
 static DWORD rotacao_ms(void)
 {
@@ -855,15 +1181,21 @@ static void desenhar(HDC dc)
     DWORD agora = GetTickCount();
     EnterCriticalSection(&g_cs);
     semdados = (g_ncampos == 0) || (agora - g_ultimo > SEM_DADOS_MS);
-    g_pal = (!semdados && tem_alerta()) ? &PAL_ALERTA : &PAL_NEON;
+    {
+        int nv = semdados ? 0 : nivel_alerta();
+        g_pal = nv == 2 ? &PAL_ALERTA : nv == 1 ? &PAL_AVISO : &PAL_NEON;
+    }
     prog = (int)((agora - g_inicio) * LARG / rotacao_ms());
     if (prog > LARG) prog = LARG;
     if (semdados) tela_sem_dados(dc);
     else switch (g_vista % n_telas()) {
         case 0: tela_internet(dc, prog); break;
-        case 1: tela_servidor(dc, prog); break;
-        case 2: tela_maquinas(dc, prog); break;
-        case 3: tela_servicos(dc, prog); break;
+        case 1: tela_conexao(dc, prog); break;
+        case 2: tela_servidor(dc, prog); break;
+        case 3: tela_maquinas(dc, prog); break;
+        case 4: tela_servicos(dc, prog); break;
+        case 5: tela_seguranca(dc, prog); break;
+        case 6: tela_sistema(dc, prog); break;
         default: tela_alerta(dc, prog); break;
     }
     LeaveCriticalSection(&g_cs);
@@ -903,7 +1235,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         int x = LOWORD(l), y = HIWORD(l);
         GetClientRect(h, &rc);
         if (x > rc.right - 40 && y < 40) { DestroyWindow(h); return 0; }
-        if (internet_fora(NULL)) g_silenciado = 1;    /* toque silencia o alarme */
+        reconhecer();                                 /* toque reconhece o critico atual */
         proxima_tela(h);
         return 0;
     }
