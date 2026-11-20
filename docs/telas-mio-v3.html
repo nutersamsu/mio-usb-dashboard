@@ -163,9 +163,9 @@ const SIT = [
   { titulo: "INTERNET OK", rot: "OK", cor: K.ok, gw: 1, net: 1, dns: 1, lat: "6", per: "0",
     problemas: [] },
   { titulo: "DNS FALHANDO", rot: "ALERTA", cor: K.am, gw: 1, net: 1, dns: 0, lat: "7", per: "0",
-    problemas: [["DNS falhando", "há 1 min", 1]] },
+    problemas: [["DNS falhando", 1]] },
   { titulo: "INTERNET FORA", rot: "CRÍTICO", cor: K.al, gw: 1, net: 0, dns: null, lat: "–", per: "–",
-    problemas: [["Internet caiu (WAN ou provedor)", "há 3 min", 2], ["Disco do pve em 91%", "há 12 min", 1]] },
+    problemas: [["Internet caiu há 3 min", 2], ["DISCO 91%", 1]] },
 ];
 const corEstado = v => v === 1 ? K.ok : v === 0 ? K.al : K.off;
 
@@ -202,7 +202,7 @@ const TELAS = [
       s += painel(4, 23, 312, 46, "ESTADO");
       s += T(16, 57, st.titulo, 20, K.txt, 700) + pill(306, 42, st.rot, st.cor);
       s += painel(4, 73, 312, 78, "CAMINHO", .3);
-      const nos = [["PVE", "local", 1], ["GATEWAY", "0,2 ms", st.gw], ["INTERNET", st.net === 0 ? "sem resposta" : "1.1.1.1", st.net], ["DNS", st.dns === null ? "–" : st.dns ? "Unbound" : "falhou", st.dns]];
+      const nos = [["PVE", "local", 1], ["GATEWAY", "0,2 ms", st.gw], ["INTERNET", st.net === 0 ? "sem resposta" : "responde", st.net], ["DNS", st.dns === null ? "–" : st.dns ? "resolve" : "falhou", st.dns]];
       const xs = [44, 124, 204, 284];
       for (let k = 0; k < 3; k++) {
         const ok = nos[k][2] === 1 && nos[k + 1][2] === 1;
@@ -212,7 +212,7 @@ const TELAS = [
         s += T(xs[k], 97, n, 9, K.mut, 700, "middle", 1);
         s += `<circle cx="${xs[k]}" cy="${112}" r="8" fill="${mix(K.pan, corEstado(e), .25)}" stroke="${corEstado(e)}" stroke-width="2"/>`;
         s += C(xs[k], 112, 3.5, corEstado(e));
-        s += T(xs[k], 139, v, 11, e === 0 ? K.al : K.txt, 700, "middle");
+        s += T(xs[k], 139, v, 11, e === 0 ? (k === 3 ? K.am : K.al) : e === null ? K.mut : K.txt, 700, "middle");
       });
       const lat = st.lat === "–" ? 0 : +st.lat;
       s += painel(4, 155, 101, 81, "LATÊNCIA", 0);
@@ -283,16 +283,17 @@ const TELAS = [
       const p = P(), cor = K.ok;
       let s = topo("SEGURANÇA", i, pr);
       s += painel(4, 23, 154, 152, "CROWDSEC");
-      s += `<polygon points="81,44 111,55 111,84 81,110 51,84 51,55" fill="${mix(K.pan, cor, .2)}" stroke="${cor}" stroke-width="2"/>`;
-      s += `<polyline points="67,77 77,88 96,64" fill="none" stroke="${cor}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      s += `<polygon points="81,42 113,54 113,85 81,112 49,85 49,54" fill="${cor}"/>`;
+      s += `<polygon points="81,45 110,56 110,83 81,108 52,83 52,56" fill="${mix(K.pan, cor, .2)}"/>`;
+      s += `<polygon points="64,78 69,73 77,81 93,61 98,66 77,91" fill="${cor}"/>`;
       s += T(81, 136, "PROTEGIDO", 17, cor, 700, "middle", 1);
       s += T(81, 154, "LAPI no ar", 9, K.mut, 600, "middle");
-      s += T(81, 166, "bouncer no OPNsense", 9, K.mut, 600, "middle");
+      s += T(81, 166, "só leitura", 9, K.mut, 600, "middle");
       s += painel(162, 23, 154, 152, "BLOQUEIOS", .4);
       s += T(239, 98, "1", 52, K.txt, 700, "middle");
       s += T(239, 118, "IP BLOQUEADO AGORA", 9.5, p.a, 700, "middle", .6);
       s += R(184, 128, 110, 1, mix(p.a, p.b, .5));
-      s += T(239, 150, "3", 18, K.txt, 700, "end") + T(244, 150, "novos em 24 h", 10, K.mut, 600);
+      s += T(226, 150, "3", 18, K.txt, 700, "end") + T(231, 150, "novos em 24 h", 9.5, K.mut, 600);
       s += T(239, 166, "detecções locais e cscli", 8.5, K.mut, 600, "middle");
       s += painel(4, 179, 154, 57, "LISTA DA COMUNIDADE", .7);
       s += T(81, 216, "15.057", 17, K.txt, 700, "end") + T(86, 216, "IPs", 10, p.b, 700);
@@ -306,8 +307,8 @@ const TELAS = [
       let s = topo("SISTEMA", i, pr);
       s += painel(4, 23, 154, 104, "USB SERIAL");
       s += C(18, 48, 5, K.ok) + T(29, 52, "CONECTADO", 13, K.txt, 700);
-      s += T(14, 68, "COM9 · driver ipaq", 9, K.mut, 600);
-      [["linhas recebidas", "12.480"], ["enviadas", "2.096"], ["erros", "0"]].forEach(([a, b], k) => {
+      s += T(14, 68, "COM9: · 115200", 9, K.mut, 600);
+      [["linhas recebidas", "12480"], ["sinais enviados", "2096"], ["último erro", "nenhum"]].forEach(([a, b], k) => {
         s += T(14, 88 + k * 14, a, 9.5, K.mut, 600) + T(148, 88 + k * 14, b, 10.5, K.txt, 700, "end");
       });
       s += painel(162, 23, 154, 104, "DADOS", .4);
@@ -326,7 +327,7 @@ const TELAS = [
       const corN = [K.mut, K.am, K.al], rotN = ["INFO", "ALERTA", "CRÍTICO"];
       ev.forEach(([h, n, t], k) => {
         const y = 156 + k * 18;
-        s += T(14, y, h, 10, K.mut, 700) + R(46, y - 9, 3, 11, corN[n]);
+        s += T(14, y, h, 9.5, K.mut, 700) + R(46, y - 9, 3, 11, corN[n]);
         s += T(55, y, t, 11, K.txt, 700) + T(306, y, rotN[n], 8.5, corN[n], 700, "end", .8);
       });
       s += T(160, 231, "MioDash 3.0 · host 2026.11", 8, K.mut, 600, "middle");
@@ -339,10 +340,10 @@ const TELAS = [
       let s = topo(nivel === 2 ? "CRÍTICO" : "ALERTA", -1, pr);
       s += painel(4, 23, 312, 213, "PROBLEMAS");
       s += arco(160, 92, 42, 7, 1, 28) + T(160, 106, "!", 38, "#fff", 700, "middle");
-      st.problemas.forEach(([a, b, n], k) => {
+      st.problemas.forEach(([a, n], k) => {
         const y = 146 + k * 36, cor = n === 2 ? K.al : K.am;
         s += painel(14, y, 292, 30, "", .5) + R(15, y + 6, 3, 18, cor);
-        s += T(26, y + 20, a, 13, K.txt, 700) + T(296, y + 20, b, 10, p.c, 600, "end");
+        s += T(26, y + 20, a, 13, K.txt, 700);
       });
       s += T(160, 228, nivel === 2 ? "toque para reconhecer e silenciar" : "aviso sem som", 10, p.c, 600, "middle");
       nivel = guard;

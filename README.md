@@ -1,13 +1,16 @@
 # Mio USB Dashboard
 
-Transforma o GPS **Mio DigiWalker C250 Plus** (Samsung S3C2440 / ARM920T, 64 MB, 320x240, Windows CE Core 5.0) num mini-painel de **sistema, rede e alertas** do servidor (Proxmox), ligado pelo **cabo USB**.
+Transforma o GPS **Mio DigiWalker C250 Plus** (Samsung S3C2440 / ARM920T, 64 MB, 320x240, Windows CE Core 5.0) numa central física de **monitoramento do homelab** (Proxmox, internet, VMs, serviços e CrowdSec), ligada pelo **cabo USB**. Só leitura em tudo, sem root e sem nada exposto na rede.
 
 ```
 mio-usb-dashboard/
 ├── host/                     → roda no Proxmox/Linux
 │   ├── server.py             coletor + envio pela serial USB (+ HTTP opcional, só local)
 │   ├── fonte_zabbix.py       internet da casa (WAN do OPNsense) lida do Zabbix
-│   ├── fonte_pve.py          VMs/CTs (pvesh) e serviços por TCP
+│   ├── fonte_pve.py          VMs/CTs (API do PVE com token só leitura) e serviços por TCP
+│   ├── fonte_rede.py         diagnóstico: gateway, internet, DNS, latência e perda
+│   ├── fonte_crowdsec.py     CrowdSec pela LAPI (chave de bouncer, só leitura)
+│   ├── eventos.py            últimos eventos (alerta subiu/desceu) para a tela Sistema
 │   ├── fonte_internet.py     teste de queda da internet (ping) e horário de silêncio
 │   ├── simular_queda.sh      simula queda e volta da internet (para testar o alarme)
 │   ├── test_*.py             testes: python3 -m unittest (em host/)
@@ -20,24 +23,29 @@ mio-usb-dashboard/
 │   ├── Makefile              compila com CeGCC (arm-mingw32ce-gcc)
 │   └── gatilho.mscr.modelo   modelo dos gatilhos de inicialização
 └── sdcard/                   → copiar para a RAIZ do cartão SD
-docs/telas-mio-v2.html        → desenho aprovado das telas (tema Neon)
+docs/telas-mio-v3.html        → desenho atual das telas (7 telas + alerta em 2 níveis)
+SECURITY.md                   → controles de segurança e limitações
 ```
 
 ## Telas
 
-Tema Neon, 320x240, cada tela fica `tempo_tela` segundos (padrão 20) e um toque passa para a próxima.
+Tema Neon, 320x240. Cada tela fica `tempo_tela` segundos (padrão 20) e um toque passa para a próxima. São 7 telas na rotação, e a de alerta entra quando há problema.
 
-| Internet (OPNsense via Zabbix) | Servidor (Proxmox) |
+| Internet (OPNsense via Zabbix) | Conexão (diagnóstico) |
 |---|---|
-| ![Tela Internet](docs/telas/1-internet.png) | ![Tela Servidor](docs/telas/2-servidor.png) |
-| **Máquinas (VMs e CTs)** | **Serviços** |
-| ![Tela Máquinas](docs/telas/3-maquinas.png) | ![Tela Serviços](docs/telas/4-servicos.png) |
-| **Alerta** (só quando algo sai do normal; o tema fica vermelho) | |
-| ![Tela Alerta](docs/telas/5-alerta.png) | |
+| ![Tela Internet](docs/telas/1-internet.png) | ![Tela Conexão](docs/telas/2-conexao.png) |
+| **Servidor (Proxmox)** | **Máquinas (VMs e CTs)** |
+| ![Tela Servidor](docs/telas/3-servidor.png) | ![Tela Máquinas](docs/telas/4-maquinas.png) |
+| **Serviços** | **Segurança (CrowdSec)** |
+| ![Tela Serviços](docs/telas/5-servicos.png) | ![Tela Segurança](docs/telas/6-seguranca.png) |
+| **Sistema (USB, fontes, eventos)** | **Alerta crítico** (vermelho, apita; um toque reconhece) |
+| ![Tela Sistema](docs/telas/7-sistema.png) | ![Tela Alerta crítico](docs/telas/8-alerta.png) |
+| **Alerta âmbar** (só aviso, sem som) | **Conexão com DNS falhando** |
+| ![Tela Alerta âmbar](docs/telas/9-alerta-aviso.png) | ![Tela Conexão com DNS falhando](docs/telas/2b-conexao-dns.png) |
 
-> Imagens geradas a partir do desenho `docs/telas-mio-v2.html` com números de exemplo
-> (`node docs/telas/gerador/gerar.js` + ImageMagick). No aparelho a fonte é Tahoma e algumas
-> posições variam um pouco.
+> Imagens geradas a partir do desenho `docs/telas-mio-v3.html` com números de exemplo
+> (`node docs/telas/gerador/gerar.js docs/telas-mio-v3.html <pasta> "DejaVu Sans"` + ImageMagick).
+> No aparelho a fonte é Tahoma e algumas posições variam um pouco.
 
 ## Compatibilidade
 

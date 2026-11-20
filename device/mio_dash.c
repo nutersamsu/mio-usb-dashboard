@@ -1123,12 +1123,13 @@ static void tela_alerta(HDC dc, int prog)
     niveis[sizeof(niveis) - 1] = 0;
     for (p = lista; *p; p++) if (*p == ';') n++;
     n++;
+    /* rodape em y=226: as linhas terminam ate y=212 para nao encostar nele */
     if (n <= 2) {
-        arco(dc, 160, 98, 46, 7, 1000, 28);
-        txt(dc, 34, 1, RGB(255, 255, 255), 160, 112, L"!", MEIO);
-        y = 156;
+        arco(dc, 160, 92, 42, 7, 1000, 28);
+        txt(dc, 34, 1, RGB(255, 255, 255), 160, 106, L"!", MEIO);
+        y = 146;
     } else y = 34;
-    for (tok = lista; tok && *tok && y < 196; tok = p, i++) {
+    for (tok = lista; tok && *tok && y <= 182; tok = p, i++) {
         p = strchr(tok, ';');
         if (p) *p++ = 0;
         parte(niveis, i, nv, sizeof(nv));
