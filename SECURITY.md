@@ -10,7 +10,9 @@ O Mio C250 fala com o servidor **só pela serial USB**. Não há rede entre os d
 | Usuário | O serviço roda como `mio-painel` (usuário de sistema, sem shell, sem home), só com o grupo `dialout` para abrir `/dev/mio`. |
 | Proxmox | Token de API `mio@pve!painel` com papel **PVEAuditor** (só `*.Audit`, nenhuma escrita). TLS verificado com a CA do cluster copiada para `/etc/mio-dashboard/pve-root-ca.pem`. O usuário `mio@pve` não tem senha (não entra na interface web). |
 | Zabbix | Usuário `mio-painel` só leitura, token de API. |
+| CrowdSec | Chave de **bouncer** `mio-painel`: só lê decisões. Escrita é recusada pela LAPI (POST → 401). O painel não bloqueia nem desbloqueia nada. |
 | Segredos | Fora do repositório e do código, em `/etc/mio-dashboard/` (pasta 700, arquivos 600, dono `mio-painel`). Os tokens não vão para logs nem mensagens de erro. |
+| Estado | Só `/var/lib/mio-dashboard` é gravável (`StateDirectory`, 700): ids de decisões do CrowdSec vistos em 24 h. |
 | systemd | `NoNewPrivileges`, sem capabilities, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `DevicePolicy=closed` + só `char-ttyUSB`, famílias de rede limitadas (`systemd-analyze security`: 3.0 OK). |
 | Reinício | `Restart=on-failure` com limite de 10 tentativas em 10 min. Config inválida sai com código 78 e não é reiniciada. |
 
@@ -25,5 +27,6 @@ O Mio C250 fala com o servidor **só pela serial USB**. Não há rede entre os d
 
 ```bash
 pveum user token remove mio@pve painel     # ou: pveum user delete mio@pve
+docker exec crowdsec cscli bouncers delete mio-painel
 ```
 No Zabbix, desative o usuário `mio-painel` ou apague o token dele.

@@ -20,6 +20,9 @@ User=mio-painel
 Group=mio-painel
 SupplementaryGroups=dialout
 UMask=0077
+# /var/lib/mio-dashboard (gravavel, dono mio-painel): ids do CrowdSec vistos em 24 h
+StateDirectory=mio-dashboard
+StateDirectoryMode=0700
 
 # Endurecimento
 NoNewPrivileges=yes

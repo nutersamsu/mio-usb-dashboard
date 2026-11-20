@@ -20,6 +20,7 @@ import html
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -29,7 +30,9 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fonte_crowdsec import CrowdSec  # noqa: E402
 from fonte_internet import TesteInternet, em_silencio  # noqa: E402
+from fonte_rede import DiagnosticoRede, dns_auto  # noqa: E402
 import fonte_pve  # noqa: E402
 from fonte_pve import ler_maquinas, testar_servicos  # noqa: E402
 from fonte_zabbix import Internet, Zabbix  # noqa: E402
@@ -57,7 +60,8 @@ CONFIG_PADRAO = {
         {"nome": "PG", "check": "tcp:127.0.0.1:5432"}
     ],
     "proxmox": True,                # conta VMs/CTs rodando (qm/pct), se existirem
-    "limites": {"cpu": 85, "ram": 90, "disco": 90, "temp": 85, "ping_falhas": 3},
+    "limites": {"cpu": 85, "ram": 90, "disco": 90, "temp": 85, "ping_falhas": 3,
+                "latencia": 150, "perda": 5},   # ms e % (internet)
     "serial": {
         "ativo": False,
         "porta": "/dev/ttyUSB0",    # ou /dev/mio (regra udev do setup_usb_serial.sh)
@@ -87,6 +91,12 @@ def carregar_config(caminho):
                 cfg[k] = v
     return cfg
 
+
+# leitura boa por fonte (falha de coleta != servico fora: CrowdSec parado e leitura boa)
+LEITURA_BOA = {"internet": lambda r: r.get("wok") == "1",
+               "maquinas": lambda r: r.get("nvm", "-") != "-",
+               "crowdsec": lambda r: r.get("cs") != "e"}
+NOMES_FONTE = {"pve": "Proxmox", "crowdsec": "CrowdSec"}   # zabbix ja tem "OPNsense sem dados"
 
 EX_CONFIG = 78                      # erro de configuracao: o systemd nao reinicia (RestartPreventExitStatus)
 
@@ -134,10 +144,19 @@ class Coletor:
         self._extra, self._extra_em = {}, {}
         self.internet = None
         it = cfg.get("internet_teste", {})
-        self.teste_net = TesteInternet(it.get("alvos", ["1.1.1.1", "8.8.8.8"]), int(it.get("falhas", 3)))
+        alvos = it.get("alvos", ["1.1.1.1", "8.8.8.8"])
+        self.teste_net = TesteInternet(alvos, int(it.get("falhas", 3)))
+        dns = it.get("dns", "auto")
+        self.diag = DiagnosticoRede(alvos, dns_auto(rota_padrao()[1]) if dns == "auto" else dns,
+                                    it.get("dns_nomes", ["cloudflare.com", "google.com"]))
+        cs = cfg.get("crowdsec")
+        self.crowdsec = (CrowdSec(cs["url"], cs["chave_arquivo"], cs.get("estado"),
+                                  bool(cs.get("comunidade", True))) if cs else None)
+        self._ok_em, self._inicio = {}, time.monotonic()
         api = cfg.get("proxmox_api")
         self.ler_pve = (fonte_pve.leitor_api(api["url"], api["token_arquivo"], api.get("ca"))
                         if api else fonte_pve._pvesh)
+        self.vigiar_pve = bool(api) or bool(shutil.which("pvesh"))
         z = cfg.get("zabbix")
         if z:
             token = ler(z["token_arquivo"]).strip()
@@ -300,13 +319,18 @@ class Coletor:
         return d
 
     def extras(self, agora):
-        """Internet (Zabbix), maquinas (pvesh) e servicos TCP, cada um no seu ritmo."""
+        """Internet (Zabbix), maquinas (Proxmox), servicos TCP, rede e CrowdSec, cada um no seu ritmo.
+
+        Cada fonte guarda a hora da ultima leitura BOA; passando do limite ela entra no campo
+        'old' (dado velho = falha de coleta, diferente de 'servico fora')."""
         tarefas = [("internet", 10, lambda: self.internet.atualizar(
                         datetime.now(timezone.utc)) if self.internet else {"wok": "0"},
                     {"wok": "0"}),
                    ("maquinas", 5, lambda: ler_maquinas(self.ler_pve), {"nvm": "-"}),
                    ("servicos", 10, lambda: testar_servicos(self.cfg["servicos"]), {"nsv": "-"}),
                    ("net", 10, lambda: self._testar_net(agora), {"net": "1", "som": "0"})]
+        if getattr(self, "crowdsec", None):
+            tarefas.append(("crowdsec", 60, lambda: self.crowdsec.atualizar(time.time()), {"cs": "e"}))
         for nome, periodo, f, se_falhar in tarefas:
             if agora - self._extra_em.get(nome, -1e9) >= periodo:
                 try:
@@ -315,16 +339,42 @@ class Coletor:
                     sys.stderr.write("%s: %r\n" % (nome, e))
                     self._extra[nome] = dict(se_falhar)
                 self._extra_em[nome] = agora
+                if LEITURA_BOA.get(nome, lambda r: True)(self._extra[nome]):
+                    self._ok_em[nome] = agora
+                elif nome == "crowdsec" and self.crowdsec.ultimo_erro:
+                    sys.stderr.write("crowdsec: %s\n" % self.crowdsec.ultimo_erro)
         junto = {}
         for v in self._extra.values():
             junto.update(v)
+        junto["old"] = ",".join(self.velhas(agora, {t[0]: t[1] for t in tarefas}))
         return junto
 
+    def velhas(self, agora, periodos=None):
+        """Codigos das fontes sem leitura boa ha mais de max(3 x periodo, 60 s)."""
+        periodos = periodos or {}
+        vigiar = {"maquinas": "pve"} if getattr(self, "vigiar_pve", True) else {}
+        if getattr(self, "internet", None):
+            vigiar["internet"] = "zabbix"
+        if getattr(self, "crowdsec", None):
+            vigiar["crowdsec"] = "crowdsec"
+        saida = []
+        for nome, codigo in sorted(vigiar.items(), key=lambda x: x[1]):
+            ultima = self._ok_em.get(nome, self._inicio)
+            if agora - ultima > max(3 * periodos.get(nome, 10), 60):
+                saida.append(codigo)
+        return saida
+
     def _testar_net(self, agora):
-        self.teste_net.testar(agora)
+        if self.diag:
+            self.teste_net.registrar(self.diag.testar(), agora)
+        else:
+            self.teste_net.testar(agora)
         d = self.teste_net.estado(agora)
         d["netmin"] = str(self.teste_net.minutos_fora(agora))
         d["som"] = som_ativo(self.cfg, time.localtime().tm_hour)
+        if self.diag:
+            gw_ok = self._ping_falhas < self.cfg["limites"]["ping_falhas"]
+            d.update(self.diag.campos(gw_ok, d["net"] == "1", self.cfg["limites"]))
         return d
 
     def alertas(self, d, agora=None):
@@ -349,7 +399,21 @@ class Coletor:
         if d["temp"] is not None and d["temp"] > L["temp"]:
             a.append("TEMP %.0fC" % d["temp"])
         if self._ping_falhas >= L["ping_falhas"]:
-            a.append("SEM PING " + d["ping_alvo"])
+            a.append("Gateway sem resposta")
+        if ex.get("net") != "0":                     # com a internet fora, o resto e consequencia
+            if ex.get("dns") == "0":
+                a.append("DNS falhando")
+            if ex.get("nst") == "perda":
+                a.append("Perda de pacotes %s%%" % ex.get("per", "?"))
+            if ex.get("nst") == "lat":
+                a.append("Latência alta %s ms" % ex.get("lat", "?"))
+        if ex.get("cs") == "0":
+            a.append("CrowdSec parado")
+        elif ex.get("cs") == "e":
+            a.append("CrowdSec sem leitura")
+        for f in filter(None, ex.get("old", "").split(",")):
+            if f in NOMES_FONTE:
+                a.append("Sem dados: " + NOMES_FONTE[f])
         for nome, ok in d["servicos"]:
             if not ok:
                 a.append(nome + " fora do ar")

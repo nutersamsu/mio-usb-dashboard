@@ -116,6 +116,26 @@ O `MioDash.exe` (deste projeto) já vem compilado em `sdcard/MioAutoRun/Apps/`.
 `wok` (1/0), `wd`/`wu` Mbit/s, `wg` 20 pares `down/up` 0–99, `wm` máximo do gráfico, `hd hu ht` hoje, `md mu mt` mês, `mes dia ndias`, `vm1..vm6 = nome;VM 100;1;18%;9,1 GB`, `nvm`, `sv1..sv9 = nome;1;ms`, `nsv`, `rot` (segundos por tela),
 `net` (1/0) e `som` (1 = pode apitar). A linha vai em cp1252 (página de código do Mio). Valores nunca têm `|`; linha ≤ 2048 bytes.
 
+### Diagnóstico da internet, CrowdSec e dados velhos (bloco 2)
+O host já manda estes campos. Por enquanto o Mio só os mostra pela lista de alertas (`alr`); as telas novas vêm depois.
+
+| Campo | Significado |
+|---|---|
+| `gw` | 1/0, o gateway (OPNsense pela LAN) responde ao ping |
+| `lat` | latência média em ms até 1.1.1.1/8.8.8.8 (últimas 6 rodadas, ~1 min) |
+| `per` | % de perda de pacotes (últimas 20 rodadas; queda total não conta como perda) |
+| `dns` | 1/0, o DNS do sistema resolve (3 falhas seguidas = 0) |
+| `nst` | `ok`, `gw` (gateway fora), `net` (internet fora: WAN ou provedor), `dns`, `perda`, `lat` |
+| `nlv` | 0 OK, 1 ALERTA, 2 CRÍTICO |
+| `cs` | CrowdSec: 1 no ar, 0 LAPI fora, `e` no ar mas sem leitura (chave/rede) |
+| `csb` `csn` `csl` | IPs bloqueados por decisões locais, decisões locais novas em 24 h, decisões da lista comunitária |
+| `old` | fontes sem leitura boa há mais de max(3 × período, 60 s): `pve`, `zabbix`, `crowdsec` |
+
+- **DNS:** a falha só de DNS nunca vira "internet caiu". No pve o `auto` usa o primeiro `nameserver` de `/etc/resolv.conf` (192.168.1.1). Como o OPNsense redireciona toda consulta na porta 53 para o Unbound, na prática o teste mede o Unbound.
+- **WAN:** o pve não sabe se o cabo da WAN caiu ou se é o provedor. Os dois aparecem como `net`. Separar exigiria a API do OPNsense.
+- **Alertas novos** (texto em `alr`): `Gateway sem resposta`, `DNS falhando`, `Perda de pacotes N%`, `Latência alta N ms`, `CrowdSec parado`, `CrowdSec sem leitura`, `Sem dados: Proxmox/CrowdSec`. Limites em `limites.latencia` (150 ms) e `limites.perda` (5 %).
+- **CrowdSec:** chave de bouncer (`cscli bouncers add mio-painel -o raw` no contêiner) em `/etc/mio-dashboard/crowdsec.key` (600). Config `"crowdsec": {"url": "http://IP:8088", "chave_arquivo": ..., "estado": "/var/lib/mio-dashboard/crowdsec-vistos.json"}`. A lista comunitária (~2 MB) é lida no máximo a cada 30 min.
+
 ---
 
 ## 0. O que já foi verificado no aparelho (20/11/2026)

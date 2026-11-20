@@ -51,7 +51,9 @@
     "ram": 90,
     "disco": 90,
     "temp": 85,
-    "ping_falhas": 3
+    "ping_falhas": 3,
+    "latencia": 150,
+    "perda": 5
   },
   "serial": {
     "ativo": true,
@@ -74,11 +76,22 @@
     ],
     "falhas": 3,
     "som": true,
-    "silencio": "23-7"
+    "silencio": "23-7",
+    "dns": "auto",
+    "dns_nomes": [
+      "cloudflare.com",
+      "google.com"
+    ]
   },
   "proxmox_api": {
     "url": "https://127.0.0.1:8006",
     "token_arquivo": "/etc/mio-dashboard/pve.token",
     "ca": "/etc/mio-dashboard/pve-root-ca.pem"
+  },
+  "crowdsec": {
+    "url": "http://192.168.1.10:8088",
+    "chave_arquivo": "/etc/mio-dashboard/crowdsec.key",
+    "estado": "/var/lib/mio-dashboard/crowdsec-vistos.json",
+    "comunidade": true
   }
 }

@@ -64,6 +64,7 @@ class TestExtrasRobustos(unittest.TestCase):
         c.cfg = server.carregar_config(None)
         c._extra, c._extra_em = {}, {}
         c.ler_pve = None
+        c._ok_em, c._inicio, c.crowdsec = {}, 1000.0, None
 
         class Quebrada:
             def atualizar(self, agora):
