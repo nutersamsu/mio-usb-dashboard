@@ -34,6 +34,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from eventos import Eventos  # noqa: E402
 from fonte_crowdsec import CrowdSec  # noqa: E402
 from fonte_internet import TesteInternet, em_silencio  # noqa: E402
+import fonte_rede  # noqa: E402
+import transporte  # noqa: E402
 from fonte_rede import DiagnosticoRede, dns_auto  # noqa: E402
 import fonte_pve  # noqa: E402
 from fonte_pve import ler_maquinas, testar_servicos  # noqa: E402
@@ -131,7 +133,15 @@ def http_ativo(cfg):
 
 
 def rota_padrao():
-    """(interface, gateway) da rota padrao, lendo /proc/net/route."""
+    """(interface, gateway) da rota padrao, lendo /proc/net/route (Linux) ou 'route print' (Windows).
+    No Windows a interface e "total" (soma de todas as placas, via psutil)."""
+    if os.name == "nt":
+        try:
+            r = subprocess.run(["route", "print", "-4", "0.0.0.0"], capture_output=True,
+                               text=True, timeout=5)
+            return "total", fonte_rede.gateway_windows(r.stdout)
+        except (OSError, subprocess.SubprocessError):
+            return "total", None
     for linha in ler("/proc/net/route").splitlines()[1:]:
         p = linha.split()
         if len(p) >= 3 and p[1] == "00000000":
@@ -197,6 +207,10 @@ class Coletor:
         return round(100.0 * (1 - (ocioso - ant[0]) / float(total - ant[1])), 1)
 
     def memoria(self):
+        if not os.path.exists("/proc/meminfo") and psutil:      # Windows/macOS
+            vm = psutil.virtual_memory()
+            total, usada = vm.total / 2 ** 20, (vm.total - vm.available) / 2 ** 20
+            return round(usada), round(total), round(100.0 * usada / total, 1) if total else 0
         info = {}
         for l in ler("/proc/meminfo").splitlines():
             k, _, v = l.partition(":")
@@ -207,6 +221,9 @@ class Coletor:
         return round(usada), round(total), round(100.0 * usada / total, 1) if total else 0
 
     def disco(self):
+        if not hasattr(os, "statvfs"):                          # Windows: "disco": "C:\\"
+            u = psutil.disk_usage(self.cfg["disco"])
+            return round(u.free / 1e9, 1), round(u.total / 1e9, 1), round(u.percent, 1)
         st = os.statvfs(self.cfg["disco"])
         total = st.f_blocks * st.f_frsize
         livre = st.f_bavail * st.f_frsize
@@ -246,13 +263,21 @@ class Coletor:
         return round(melhor, 1) if melhor else None
 
     def uptime(self):
+        if not os.path.exists("/proc/uptime") and psutil:
+            return time.time() - psutil.boot_time()
         return float(ler("/proc/uptime", "0").split()[0])
 
     # --- rede
     def trafego(self, iface):
-        linhas = ler("/proc/net/dev").splitlines()[2:]
         rx = tx = None
-        for l in linhas:
+        if not os.path.exists("/proc/net/dev") and psutil:      # Windows/macOS
+            if iface == "total":
+                c = psutil.net_io_counters()
+            else:
+                c = psutil.net_io_counters(pernic=True).get(iface)
+            if c:
+                rx, tx = c.bytes_recv, c.bytes_sent
+        for l in ler("/proc/net/dev").splitlines()[2:]:
             nome, _, resto = l.partition(":")
             if nome.strip() == iface:
                 c = resto.split()
@@ -268,8 +293,14 @@ class Coletor:
 
     def ping(self, alvo):
         try:
-            r = subprocess.run(["ping", "-c", "1", "-W", "1", alvo],
-                               capture_output=True, text=True, timeout=3)
+            r = subprocess.run(fonte_rede.comando_ping(alvo, 1), capture_output=True,
+                               text=True, timeout=3)
+            if os.name == "nt":
+                ms = fonte_rede.ms_de_um_ping(r.stdout)
+                if ms is not None:
+                    self._ping_falhas = 0
+                    return ms
+                raise OSError("sem resposta")
             m = re.search(r"time[=<]([\d.]+)", r.stdout)
             if r.returncode == 0 and m:
                 self._ping_falhas = 0
@@ -283,6 +314,8 @@ class Coletor:
         tipo, _, alvo = check.partition(":")
         try:
             if tipo == "systemd":
+                if os.name == "nt":
+                    return False                         # no Windows use tcp:host:porta
                 r = subprocess.run(["systemctl", "is-active", "--quiet", alvo], timeout=3)
                 return r.returncode == 0
             if tipo == "tcp":
@@ -538,32 +571,25 @@ def linha_serial(d):
 
 
 def loop_serial(coletor, cfg):
-    import termios
+    """Envia a linha a cada intervalo. Porta: /dev/mio (Linux), COMx (Windows) ou "usb" (libusb)."""
     porta, baud = cfg["serial"]["porta"], cfg["serial"]["baud"]
-    vel = getattr(termios, "B%d" % baud, termios.B115200)
     ev = getattr(coletor, "eventos", None)
     conectado = False
     while True:
-        fd = None
+        t = None
         try:
-            fd = os.open(porta, os.O_RDWR | os.O_NOCTTY)
-            at = termios.tcgetattr(fd)
-            at[0] = 0; at[1] = 0                      # iflag, oflag: cru
-            at[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
-            at[3] = 0                                 # lflag: sem eco/canonico
-            at[4] = at[5] = vel
-            termios.tcsetattr(fd, termios.TCSANOW, at)
-            sys.stderr.write("serial: enviando para %s\n" % porta)
+            t = transporte.abrir(porta, baud)
+            sys.stderr.write("serial: enviando para %s (%s)\n" % (porta, transporte.tipo(porta)))
             if ev and not conectado:
                 ev.info("Mio conectado", time.time())
             conectado = True
             while True:
                 d = coletor.atual()
                 if d and dados_frescos(d, time.monotonic()):
-                    os.write(fd, linha_serial(d))
+                    t.escrever(linha_serial(d))
                 # descarta o "MIO OLA" que o Mio manda: sem isso o buffer enche
                 # e cada envio do Mio espera 1 s de timeout
-                termios.tcflush(fd, termios.TCIFLUSH)
+                t.descartar_entrada()
                 time.sleep(cfg["intervalo"])
         except Exception as e:
             sys.stderr.write("serial %s: %r (nova tentativa em 5 s)\n" % (porta, e))
@@ -572,9 +598,9 @@ def loop_serial(coletor, cfg):
             conectado = False
             time.sleep(5)
         finally:
-            if fd is not None:
+            if t is not None:
                 try:
-                    os.close(fd)
+                    t.fechar()
                 except Exception:
                     pass
 

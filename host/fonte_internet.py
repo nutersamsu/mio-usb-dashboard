@@ -1,10 +1,15 @@
 """Teste de queda da internet (ping a partir do pve) e horario de silencio do alarme."""
+import os
 import subprocess
 import threading
 
 
 def _ping(alvo):
     try:
+        if os.name == "nt":                      # no Windows so 'TTL=' prova resposta
+            r = subprocess.run(["ping", "-n", "1", "-w", "2000", alvo],
+                               capture_output=True, text=True, timeout=5)
+            return "TTL=" in r.stdout.upper()
         r = subprocess.run(["ping", "-c", "1", "-W", "2", "-n", alvo],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
         return r.returncode == 0

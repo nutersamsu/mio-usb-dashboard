@@ -10,6 +10,7 @@ Estados (campo nst), em ordem de prioridade:
 Falha so de DNS nunca e tratada como queda da internet.
 Separar "WAN desconectada" de "provedor fora" exige a API do OPNsense (nao usada aqui).
 """
+import os
 import random
 import re
 import socket
@@ -32,11 +33,50 @@ def ler_ping(saida, n):
     return env, rec, (float(rtt.group(1)) if rtt and rec else None)
 
 
+# Windows: a saida muda com o idioma, mas toda resposta valida tem "TTL=" e o tempo
+# vem como "tempo=11ms", "durata<1ms", "time=5ms". O codigo de saida nao serve: o ping
+# do Windows devolve 0 ate para "Host de destino inacessivel".
+RE_MS_WIN = re.compile(r"[=<]\s*(\d+)\s*ms", re.I)
+
+
+def ms_de_um_ping(saida):
+    """Primeira resposta valida (com TTL=) -> ms, ou None. '<1ms' conta como 1."""
+    for linha in (saida or "").splitlines():
+        if "TTL=" in linha.upper():
+            m = RE_MS_WIN.search(linha)
+            return float(m.group(1)) if m else 1.0
+    return None
+
+
+def ler_ping_windows(saida, n):
+    rtts = []
+    for linha in (saida or "").splitlines():
+        if "TTL=" in linha.upper():
+            m = RE_MS_WIN.search(linha)
+            rtts.append(float(m.group(1)) if m else 1.0)
+    return n, len(rtts), (round(sum(rtts) / len(rtts), 1) if rtts else None)
+
+
+def gateway_windows(saida_route):
+    """'route print -4 0.0.0.0' -> gateway da rota padrao."""
+    for linha in (saida_route or "").splitlines():
+        p = linha.split()
+        if len(p) >= 3 and p[0] == "0.0.0.0" and p[1] == "0.0.0.0" and p[2].count(".") == 3:
+            return p[2]
+    return None
+
+
+def comando_ping(alvo, n, espera_s=1):
+    if os.name == "nt":
+        return ["ping", "-n", str(n), "-w", str(int(espera_s * 1000)), alvo]
+    return ["ping", "-n", "-q", "-c", str(n), "-i", "0.2", "-W", str(espera_s), alvo]
+
+
 def ping_estat(alvo, n=3):
     try:
-        r = subprocess.run(["ping", "-n", "-q", "-c", str(n), "-i", "0.2", "-W", "1", alvo],
-                           capture_output=True, text=True, timeout=n + 4)
-        return ler_ping(r.stdout, n)
+        r = subprocess.run(comando_ping(alvo, n), capture_output=True, text=True,
+                           timeout=n * 2 + 4)
+        return ler_ping_windows(r.stdout, n) if os.name == "nt" else ler_ping(r.stdout, n)
     except (OSError, subprocess.SubprocessError):
         return n, 0, None
 

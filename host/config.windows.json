@@ -1,0 +1,47 @@
+{
+  "_aviso": "EXPERIMENTAL: modo Windows nao testado. Veja a secao 'Windows (experimental)' do README.",
+  "http": false,
+  "listen": "127.0.0.1",
+  "intervalo": 2,
+  "interface": "auto",
+  "ping_alvo": "auto",
+  "disco": "C:\\",
+  "servicos": [
+    {
+      "nome": "Roteador",
+      "check": "tcp:192.168.0.1:80"
+    }
+  ],
+  "proxmox": false,
+  "limites": {
+    "cpu": 85,
+    "ram": 90,
+    "disco": 90,
+    "temp": 85,
+    "ping_falhas": 3,
+    "latencia": 150,
+    "perda": 5
+  },
+  "serial": {
+    "ativo": true,
+    "porta": "usb",
+    "baud": 115200
+  },
+  "tempo_tela": 20,
+  "internet_teste": {
+    "alvos": [
+      "1.1.1.1",
+      "8.8.8.8"
+    ],
+    "falhas": 3,
+    "som": true,
+    "silencio": "23-7",
+    "dns": "auto",
+    "dns_nomes": [
+      "cloudflare.com",
+      "google.com"
+    ]
+  },
+  "eventos_arquivo": "C:\\ProgramData\\mio-dashboard\\eventos.json",
+  "maquinas_importantes": []
+}

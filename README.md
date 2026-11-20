@@ -2,6 +2,8 @@
 
 Transforma o GPS **Mio DigiWalker C250 Plus** (Samsung S3C2440 / ARM920T, 64 MB, 320x240, Windows CE Core 5.0) numa central física de **monitoramento do homelab** (Proxmox, internet, VMs, serviços e CrowdSec), ligada pelo **cabo USB**. Só leitura em tudo, sem root e sem nada exposto na rede.
 
+> **Linux/Proxmox:** testado e em uso. **Windows:** experimental, nunca testado num PC com Windows. Veja [Windows (experimental)](#5-windows-experimental). Se você tem uma IA de programação, ela pode ajudar a terminar e testar essa parte.
+
 ```
 mio-usb-dashboard/
 ├── host/                     → roda no Proxmox/Linux
@@ -11,6 +13,8 @@ mio-usb-dashboard/
 │   ├── fonte_rede.py         diagnóstico: gateway, internet, DNS, latência e perda
 │   ├── fonte_crowdsec.py     CrowdSec pela LAPI (chave de bouncer, só leitura)
 │   ├── eventos.py            últimos eventos (alerta subiu/desceu) para a tela Sistema
+│   ├── transporte.py         envio ao Mio: /dev/mio (Linux), COMx ou USB direto (libusb)
+│   ├── config.windows.json   exemplo de config para Windows (experimental)
 │   ├── fonte_internet.py     teste de queda da internet (ping) e horário de silêncio
 │   ├── simular_queda.sh      simula queda e volta da internet (para testar o alarme)
 │   ├── test_*.py             testes: python3 -m unittest (em host/)
@@ -314,3 +318,45 @@ Para voltar ao normal, aperte o **reset** (furinho) ou tire o cartão e reinicie
 | Erro do MortScript "Comparing two string values..." | Troque `=` por `eq` e `<>` por `ne` na linha indicada |
 | "Couldn't write file" | O SD está só leitura no Mio: não grave no cartão |
 | Tela apaga mesmo assim | O gerenciador de energia da Mio pode ignorar o registro. O `MioDash.exe` mantém a tela acesa enquanto estiver aberto |
+
+## 5. Windows (experimental)
+
+> **Não testado num PC com Windows.** O código foi preparado e tem testes automáticos que simulam
+> a saída do Windows, mas ninguém rodou num Windows de verdade ainda. Se você testar, abra uma
+> *issue* contando o que deu certo e o que falhou.
+
+O programa do Mio (`MioDash.exe`) é o mesmo. O que muda é o lado do computador (`host/`).
+
+**O que já foi adaptado:**
+- **Métricas:** sem `/proc`, CPU, memória, disco, tempo ligado e tráfego vêm do `psutil`. Comparei com o Linux simulando um sistema sem `/proc` e os números bateram. A temperatura não aparece no Windows (o `psutil` não lê sensores lá).
+- **Ping:** lê a saída do `ping` do Windows pelo `TTL=` de cada resposta, que é igual em português, italiano ou inglês. O código de saída do `ping` do Windows não é confiável: ele devolve sucesso até para "host de destino inacessível".
+- **Gateway:** sai do `route print -4 0.0.0.0`. Já o tráfego é a soma de todas as placas de rede.
+- **Envio ao Mio:** além do `/dev/mio` do Linux, há dois modos novos em `"serial": {"porta": ...}`:
+  - `"usb"`: fala com o Mio direto pela USB (libusb), fazendo o mesmo que o driver `ipaq` do Linux: interface 0, comando de controle `0x22`, escrita no endpoint `0x04`, leitura no `0x81`.
+  - `"COM5"` (ou outra): se algum driver criar uma porta COM para o Mio.
+- **Serviços:** só `tcp:host:porta` (o `systemd:` não existe no Windows).
+
+**Como tentar:**
+1. Instale o [Python 3](https://www.python.org/downloads/) e rode `pip install psutil pyusb`. Para o modo COM, rode também `pip install pyserial`.
+2. Ligue o Mio na USB. Com o [Zadig](https://zadig.akeo.ie/), escolha "Mio DigiWalker USB Sync" (`3340:043A`) e instale o driver **WinUSB**. Isso troca o driver desse aparelho no seu PC; dá para desfazer pelo Gerenciador de Dispositivos.
+3. Copie `host\config.windows.json` para `host\config.json` e ajuste os serviços. Proxmox (`proxmox_api`), Zabbix e CrowdSec são opcionais e usam os mesmos tokens só leitura da seção 1.
+4. Teste com `python server.py --once` e depois rode `python server.py`. Abra o `MioDash.exe` no Mio.
+5. Para iniciar com o Windows, use o Agendador de Tarefas: "Ao iniciar o sistema", programa `pythonw.exe`, argumentos `C:\caminho\host\server.py --config C:\caminho\host\config.json`, com uma conta comum (sem administrador).
+6. Proteja os tokens: guarde-os numa pasta só sua (`icacls pasta /inheritance:r /grant:r %USERNAME%:F`).
+
+**O que pode dar errado:** o Zadig não mostrar o Mio, a libusb não achar o aparelho (`Mio nao encontrado na USB`) ou o Mio não aceitar o comando de abertura. Nesses casos, uma máquina virtual Linux (VirtualBox ou VMware) com o USB do Mio passado para ela funciona exatamente como a seção 1.
+
+### Tem uma IA de programação? Ela pode terminar isso para você
+
+Se você usa um assistente que roda comandos no seu PC (Claude Code, por exemplo), peça algo assim:
+
+```text
+Clone https://github.com/nutersamsu/mio-usb-dashboard e leia o README, principalmente
+a seção "Windows (experimental)". Quero rodar o host/ no meu Windows com o Mio C250 ligado
+na USB. Instale as dependências, me ajude a instalar o driver WinUSB no Mio com o Zadig,
+rode os testes (python -m unittest em host/) e depois python server.py --once. Se algo
+falhar, corrija o código e mantenha o Linux funcionando. No fim, me diga o que mudou
+para eu abrir um pull request.
+```
+
+Mantenha os tokens fora do chat e do repositório, e revise os comandos antes de deixar a IA executar.
