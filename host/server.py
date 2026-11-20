@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fonte_internet import TesteInternet, em_silencio  # noqa: E402
 from fonte_pve import ler_maquinas, testar_servicos  # noqa: E402
 from fonte_zabbix import Internet, Zabbix  # noqa: E402
 from urllib.parse import urlparse, parse_qs
@@ -115,6 +116,8 @@ class Coletor:
         self._internet_falha_desde = 0.0
         self._extra, self._extra_em = {}, {}
         self.internet = None
+        it = cfg.get("internet_teste", {})
+        self.teste_net = TesteInternet(it.get("alvos", ["1.1.1.1", "8.8.8.8"]), int(it.get("falhas", 3)))
         z = cfg.get("zabbix")
         if z:
             token = ler(z["token_arquivo"]).strip()
@@ -280,7 +283,8 @@ class Coletor:
                         datetime.now(timezone.utc)) if self.internet else {"wok": "0"},
                     {"wok": "0"}),
                    ("maquinas", 5, lambda: ler_maquinas(), {"nvm": "-"}),
-                   ("servicos", 10, lambda: testar_servicos(self.cfg["servicos"]), {"nsv": "-"})]
+                   ("servicos", 10, lambda: testar_servicos(self.cfg["servicos"]), {"nsv": "-"}),
+                   ("net", 10, lambda: self._testar_net(agora), {"net": "1", "som": "0"})]
         for nome, periodo, f, se_falhar in tarefas:
             if agora - self._extra_em.get(nome, -1e9) >= periodo:
                 try:
@@ -294,10 +298,19 @@ class Coletor:
             junto.update(v)
         return junto
 
+    def _testar_net(self, agora):
+        self.teste_net.testar(agora)
+        d = self.teste_net.estado(agora)
+        d["netmin"] = str(self.teste_net.minutos_fora(agora))
+        d["som"] = som_ativo(self.cfg, time.localtime().tm_hour)
+        return d
+
     def alertas(self, d, agora=None):
         agora = time.monotonic() if agora is None else agora
         L, a = self.cfg["limites"], []
         ex = d.get("extra", {})
+        if ex.get("net") == "0":
+            a.append("Internet caiu há %s min" % ex.get("netmin", "0"))
         if ex.get("wok", "1") == "0":
             if not self._internet_falha_desde:
                 self._internet_falha_desde = agora
@@ -337,7 +350,15 @@ class Coletor:
 # ----------------------------------------------------------------- serial
 DADOS_MAX_IDADE = 15        # s; coleta parada -> para de enviar e o Mio mostra SEM DADOS
 # campos que o Mio nao le: ficam fora da linha (o Mio guarda no maximo 48 campos)
-NAO_ENVIAR = {"md", "mu"}
+NAO_ENVIAR = {"md", "mu", "netmin"}
+
+
+def som_ativo(cfg, hora):
+    """'1' se o Mio pode apitar agora: som ligado e fora do horario de silencio."""
+    it = cfg.get("internet_teste", {})
+    if not it.get("som", True) or em_silencio(hora, it.get("silencio", "")):
+        return "0"
+    return "1"
 
 
 def dados_frescos(d, agora):
@@ -370,7 +391,7 @@ def linha_serial(d):
         if k not in NAO_ENVIAR:
             campos.append("%s=%s" % (k, v))
     texto = "|".join(c.replace("|", "/") for c in campos)
-    return (texto.encode("ascii", "replace") + b"\r\n")
+    return (texto.encode("cp1252", "replace") + b"\r\n")      # pagina de codigo do Mio
 
 
 def loop_serial(coletor, cfg):

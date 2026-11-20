@@ -65,5 +65,14 @@
     "total_in": "50871",
     "total_out": "50879"
   },
-  "tempo_tela": 20
+  "tempo_tela": 20,
+  "internet_teste": {
+    "alvos": [
+      "1.1.1.1",
+      "8.8.8.8"
+    ],
+    "falhas": 3,
+    "som": true,
+    "silencio": "23-7"
+  }
 }

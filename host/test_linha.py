@@ -87,6 +87,31 @@ class TestDadosVelhos(unittest.TestCase):
         self.assertFalse(server.dados_frescos({}, agora=130.0))
 
 
+class TestAlarmeInternet(unittest.TestCase):
+    def test_som_respeita_silencio_e_config(self):
+        cfg = {"internet_teste": {"som": True, "silencio": "23-7"}}
+        self.assertEqual(server.som_ativo(cfg, 12), "1")
+        self.assertEqual(server.som_ativo(cfg, 23), "0")
+        self.assertEqual(server.som_ativo({"internet_teste": {"som": False}}, 12), "0")
+        self.assertEqual(server.som_ativo({}, 12), "1")
+
+    def test_alerta_internet_caiu_com_acento_em_cp1252(self):
+        c = server.Coletor.__new__(server.Coletor)
+        c.cfg = server.carregar_config(None)
+        c._ping_falhas = 0
+        c._internet_falha_desde = 0.0
+        d = dados_exemplo()
+        d["ram"] = 50
+        d["servicos"] = []
+        d["extra"].update({"net": "0", "netmin": "3"})
+        d["alertas"] = c.alertas(d, agora=1000.0)
+        self.assertIn("Internet caiu há 3 min", d["alertas"])
+        linha = server.linha_serial(d)
+        self.assertIn("Internet caiu h\xe1 3 min".encode("latin-1"), linha)
+        self.assertNotIn(b"netmin=", linha)
+        self.assertIn(b"net=0", linha)
+
+
 class TestAlertas(unittest.TestCase):
     def test_servico_fora_e_opnsense_sem_dados(self):
         c = server.Coletor.__new__(server.Coletor)

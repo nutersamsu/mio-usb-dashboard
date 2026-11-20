@@ -98,8 +98,19 @@ O `MioDash.exe` (deste projeto) já vem compilado em `sdcard/MioAutoRun/Apps/`.
 - **Tirar/pôr o cartão derruba a USB do Mio** por alguns segundos; o MioDash reconecta sozinho.
 - **Compilar:** CeGCC 9.3.0 (MaxKellermann/cegcc-build) em `/opt/cegcc` de um LXC temporário; `make` em `device/`. O exe só importa COREDLL.
 
+### Alarme quando a internet cai
+- O pve pinga `1.1.1.1` e `8.8.8.8` a cada 10 s; se **os dois falharem 3 vezes seguidas** (~30 s), manda `net=0`
+  e o alerta "Internet caiu há N min".
+- O Mio apita **3 bips a cada 10 s** (som gerado na memória, volume no máximo). **Um toque silencia** até a
+  internet voltar. Na volta toca um **bip duplo de "tudo certo"**.
+- **Silêncio das 23h às 7h**: mostra o alerta sem som.
+- Tudo no `config.json`: `"internet_teste": {"alvos": [...], "falhas": 3, "som": true, "silencio": "23-7"}`.
+- Testar sem derrubar a internet: troque `alvos` por `["192.0.2.1"]` (endereço que nunca responde),
+  `systemctl restart mio-dashboard`, e depois volte.
+
 ### Campos novos da linha serial
-`wok` (1/0), `wd`/`wu` Mbit/s, `wg` 20 pares `down/up` 0–99, `wm` máximo do gráfico, `hd hu ht` hoje, `md mu mt` mês, `mes dia ndias`, `vm1..vm6 = nome;VM 100;1;18%;9,1 GB`, `nvm`, `sv1..sv9 = nome;1;ms`, `nsv`. Valores nunca têm `|`; linha ≤ 2048 bytes.
+`wok` (1/0), `wd`/`wu` Mbit/s, `wg` 20 pares `down/up` 0–99, `wm` máximo do gráfico, `hd hu ht` hoje, `md mu mt` mês, `mes dia ndias`, `vm1..vm6 = nome;VM 100;1;18%;9,1 GB`, `nvm`, `sv1..sv9 = nome;1;ms`, `nsv`, `rot` (segundos por tela),
+`net` (1/0) e `som` (1 = pode apitar). A linha vai em cp1252 (página de código do Mio). Valores nunca têm `|`; linha ≤ 2048 bytes.
 
 ---
 

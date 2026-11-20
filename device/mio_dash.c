@@ -282,6 +282,98 @@ static DWORD WINAPI leitor(LPVOID arg)
     return 0;
 }
 
+
+/* ------------------------------------------------------------ som
+ * Bip gerado na memoria (WAV 11025 Hz, 8 bits, mono, onda quadrada).
+ * PlaySoundW e waveOutSetVolume carregados em tempo de execucao. */
+#ifndef SND_ASYNC
+#define SND_ASYNC     0x0001
+#define SND_NODEFAULT 0x0002
+#define SND_MEMORY    0x0004
+#endif
+#define ALARME_MS     10000
+typedef BOOL (WINAPI *PFN_PLAYSOUND)(LPCWSTR, HMODULE, DWORD);
+typedef UINT (WINAPI *PFN_WAVEVOL)(HANDLE, DWORD);
+typedef struct { int hz, ms; } Nota;
+
+static PFN_PLAYSOUND g_play = NULL;
+static PFN_WAVEVOL   g_vol = NULL;
+static BYTE *g_som_alarme = NULL, *g_som_ok = NULL;
+static int   g_silenciado = 0, g_net_ant = 1;
+static DWORD g_ultimo_bip = 0;
+
+static void pos32(BYTE *b, DWORD v) { b[0] = (BYTE)v; b[1] = (BYTE)(v >> 8); b[2] = (BYTE)(v >> 16); b[3] = (BYTE)(v >> 24); }
+static void pos16(BYTE *b, WORD v)  { b[0] = (BYTE)v; b[1] = (BYTE)(v >> 8); }
+
+static BYTE *gerar_wav(const Nota *n, int qtd)
+{
+    const DWORD taxa = 11025;
+    DWORD total = 0, p = 44;
+    int i, k;
+    BYTE *b;
+    for (i = 0; i < qtd; i++) total += taxa * n[i].ms / 1000;
+    b = (BYTE *)malloc(44 + total);
+    if (!b) return NULL;
+    memcpy(b, "RIFF", 4); pos32(b + 4, 36 + total); memcpy(b + 8, "WAVEfmt ", 8);
+    pos32(b + 16, 16); pos16(b + 20, 1); pos16(b + 22, 1); pos32(b + 24, taxa);
+    pos32(b + 28, taxa); pos16(b + 32, 1); pos16(b + 34, 8);
+    memcpy(b + 36, "data", 4); pos32(b + 40, total);
+    for (i = 0; i < qtd; i++) {
+        int amostras = (int)(taxa * n[i].ms / 1000);
+        for (k = 0; k < amostras; k++)
+            b[p++] = n[i].hz == 0 ? 128 : (((k * 2 * n[i].hz / (int)taxa) & 1) ? 218 : 38);
+    }
+    return b;
+}
+
+static void carregar_som(void)
+{
+    static const Nota alarme[] = { {2000, 180}, {0, 120}, {2000, 180}, {0, 120}, {2000, 180}, {0, 60} };
+    static const Nota ok[] = { {800, 150}, {0, 80}, {1200, 220}, {0, 40} };
+    HMODULE core = LoadLibraryW(L"coredll.dll");
+    if (core) {
+        g_play = (PFN_PLAYSOUND)GetProcAddressW(core, L"PlaySoundW");
+        g_vol = (PFN_WAVEVOL)GetProcAddressW(core, L"waveOutSetVolume");
+    }
+    g_som_alarme = gerar_wav(alarme, sizeof(alarme) / sizeof(alarme[0]));
+    g_som_ok = gerar_wav(ok, sizeof(ok) / sizeof(ok[0]));
+}
+
+static void tocar(BYTE *wav)
+{
+    if (!g_play || !wav) return;
+    if (g_vol) g_vol(0, 0xFFFFFFFF);                 /* volume no maximo */
+    g_play((LPCWSTR)wav, NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+}
+
+/* estado vindo do host: internet fora (net=0) e se pode tocar (som=1) */
+static int internet_fora(int *pode_tocar)
+{
+    int fora, semdados;
+    EnterCriticalSection(&g_cs);
+    semdados = (g_ncampos == 0) || (GetTickCount() - g_ultimo > SEM_DADOS_MS);
+    fora = !semdados && strcmp(val("net"), "0") == 0;
+    if (pode_tocar) *pode_tocar = strcmp(val("som"), "1") == 0;
+    LeaveCriticalSection(&g_cs);
+    return fora;
+}
+
+static void verificar_alarme(void)
+{
+    int som = 0, fora = internet_fora(&som);
+    if (fora) {
+        if (!g_silenciado && som && GetTickCount() - g_ultimo_bip >= ALARME_MS) {
+            tocar(g_som_alarme);
+            g_ultimo_bip = GetTickCount();
+        }
+    } else if (!g_net_ant) {                          /* a internet voltou */
+        g_silenciado = 0;
+        g_ultimo_bip = 0;
+        if (som) tocar(g_som_ok);
+    }
+    g_net_ant = !fora;
+}
+
 /* ------------------------------------------------------------ desenho
  * Tema "sensor panel" Neon: paineis chanfrados, arcos e barras segmentados.
  * Coordenadas iguais ao mockup docs/telas-mio-v2.html (320x240). */
@@ -712,12 +804,18 @@ static void tela_alerta(HDC dc, int prog)
         txt(dc, 34, 1, RGB(255, 255, 255), 160, 112, L"!", MEIO);
         y = 156;
     } else y = 34;
-    for (tok = lista; tok && *tok && y < 230; tok = p) {
+    for (tok = lista; tok && *tok && y < 196; tok = p) {
         p = strchr(tok, ';');
         if (p) *p++ = 0;
         painel(dc, 14, y, 292, 30, NULL, 128);
         txta(dc, 13, 1, K_TXT, 26, y + 20, tok, ESQ);
         y += 36;
+    }
+    if (strcmp(val("net"), "0") == 0) {               /* situacao do alarme sonoro */
+        const WCHAR *s = g_silenciado ? L"alarme silenciado"
+                       : strcmp(val("som"), "1") != 0 ? L"sil\x00EAncio (23h \x00E0s 7h)"
+                       : L"toque na tela para silenciar";
+        txt(dc, 10, 0, g_pal->c, 160, 226, s, MEIO);
     }
 }
 
@@ -791,6 +889,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_TIMER:
         if (w == ID_TIMER_PROG) {
+            verificar_alarme();
             if (GetTickCount() - g_inicio >= rotacao_ms()) proxima_tela(h);
             else InvalidateRect(h, NULL, FALSE);
         }
@@ -804,6 +903,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         int x = LOWORD(l), y = HIWORD(l);
         GetClientRect(h, &rc);
         if (x > rc.right - 40 && y < 40) { DestroyWindow(h); return 0; }
+        if (internet_fora(NULL)) g_silenciado = 1;    /* toque silencia o alarme */
         proxima_tela(h);
         return 0;
     }
@@ -859,6 +959,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmd, int show)
         g_porta[15] = 0;
     }
     InitializeCriticalSection(&g_cs);
+    carregar_som();
 
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = WndProc;
