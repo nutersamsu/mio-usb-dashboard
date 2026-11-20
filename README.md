@@ -21,6 +21,22 @@ mio-usb-dashboard/
 docs/telas-mio-v2.html        → desenho aprovado das telas (tema Neon)
 ```
 
+## Telas
+
+Tema Neon, 320x240, cada tela fica `tempo_tela` segundos (padrão 20) e um toque passa para a próxima.
+
+| Internet (OPNsense via Zabbix) | Servidor (Proxmox) |
+|---|---|
+| ![Tela Internet](docs/telas/1-internet.png) | ![Tela Servidor](docs/telas/2-servidor.png) |
+| **Máquinas (VMs e CTs)** | **Serviços** |
+| ![Tela Máquinas](docs/telas/3-maquinas.png) | ![Tela Serviços](docs/telas/4-servicos.png) |
+| **Alerta** (só quando algo sai do normal; o tema fica vermelho) | |
+| ![Tela Alerta](docs/telas/5-alerta.png) | |
+
+> Imagens geradas a partir do desenho `docs/telas-mio-v2.html` com números de exemplo
+> (`node docs/telas/gerador/gerar.js` + ImageMagick). No aparelho a fonte é Tahoma e algumas
+> posições variam um pouco.
+
 ## Compatibilidade
 
 **Testado de verdade: só o Mio DigiWalker C250 Plus** (Windows CE 5.0 Core, ARM920T, 320x240).
