@@ -8,6 +8,8 @@ mio-usb-dashboard/
 │   ├── server.py             coletor + HTTP :8080 (3 vistas 320x240) + envio pela serial USB
 │   ├── fonte_zabbix.py       internet da casa (WAN do OPNsense) lida do Zabbix
 │   ├── fonte_pve.py          VMs/CTs (pvesh) e serviços por TCP
+│   ├── fonte_internet.py     teste de queda da internet (ping) e horário de silêncio
+│   ├── simular_queda.sh      simula queda e volta da internet (para testar o alarme)
 │   ├── test_*.py             testes: python3 -m unittest (em host/)
 │   ├── config.json           serviços, Zabbix, limites de alerta, porta serial
 │   ├── setup_usb_serial.sh   driver ipaq + /dev/mio  (caminho REAL do C250)
@@ -105,8 +107,10 @@ O `MioDash.exe` (deste projeto) já vem compilado em `sdcard/MioAutoRun/Apps/`.
   internet voltar. Na volta toca um **bip duplo de "tudo certo"**.
 - **Silêncio das 23h às 7h**: mostra o alerta sem som.
 - Tudo no `config.json`: `"internet_teste": {"alvos": [...], "falhas": 3, "som": true, "silencio": "23-7"}`.
-- Testar sem derrubar a internet: troque `alvos` por `["192.0.2.1"]` (endereço que nunca responde),
-  `systemctl restart mio-dashboard`, e depois volte.
+- Testar sem derrubar a internet: `host/simular_queda.sh [segundos]` troca os alvos por `192.0.2.1`
+  (endereço que nunca responde), espera e volta a configuração. No pve:
+  `systemd-run --unit mio-simula --collect /opt/mio-usb-dashboard/host/simular_queda.sh 45`
+  (45 s = ~15 s de alarme e depois o bip de volta; padrão 90 s).
 
 ### Campos novos da linha serial
 `wok` (1/0), `wd`/`wu` Mbit/s, `wg` 20 pares `down/up` 0–99, `wm` máximo do gráfico, `hd hu ht` hoje, `md mu mt` mês, `mes dia ndias`, `vm1..vm6 = nome;VM 100;1;18%;9,1 GB`, `nvm`, `sv1..sv9 = nome;1;ms`, `nsv`, `rot` (segundos por tela),

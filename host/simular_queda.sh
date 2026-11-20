@@ -1,5 +1,7 @@
 #!/bin/sh
-# Simula queda da internet para o painel do Mio e volta depois de N s (padrao 90): mio-simula.sh [segundos]
+# Simula queda da internet para o painel do Mio e volta depois de N s (padrao 90).
+# Uso no pve (unidade solta, sobrevive ao restart do servico):
+#   systemd-run --unit mio-simula --collect /opt/mio-usb-dashboard/host/simular_queda.sh 45
 C=/opt/mio-usb-dashboard/host/config.json
 cp $C /root/mio-config-antes-teste.json
 python3 -c "import json; c=json.load(open(\"$C\")); c[\"internet_teste\"][\"alvos\"]=[\"192.0.2.1\"]; json.dump(c,open(\"$C\",\"w\"),indent=2,ensure_ascii=False)"
