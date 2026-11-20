@@ -72,6 +72,13 @@ def comando_ping(alvo, n, espera_s=1):
     return ["ping", "-n", "-q", "-c", str(n), "-i", "0.2", "-W", str(espera_s), alvo]
 
 
+def comando_um_ping(alvo, espera_s=1):
+    """Um ping com a linha da resposta ('time=...'): sem -q, que esconde essa linha no Linux."""
+    if os.name == "nt":
+        return ["ping", "-n", "1", "-w", str(int(espera_s * 1000)), alvo]
+    return ["ping", "-c", "1", "-W", str(espera_s), alvo]
+
+
 def ping_estat(alvo, n=3):
     try:
         r = subprocess.run(comando_ping(alvo, n), capture_output=True, text=True,

@@ -293,7 +293,7 @@ class Coletor:
 
     def ping(self, alvo):
         try:
-            r = subprocess.run(fonte_rede.comando_ping(alvo, 1), capture_output=True,
+            r = subprocess.run(fonte_rede.comando_um_ping(alvo), capture_output=True,
                                text=True, timeout=3)
             if os.name == "nt":
                 ms = fonte_rede.ms_de_um_ping(r.stdout)

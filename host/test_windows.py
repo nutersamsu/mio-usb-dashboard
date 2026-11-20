@@ -143,3 +143,22 @@ class TestPosixComPty(unittest.TestCase):
         t.fechar()
         os.close(mestre)
         os.close(escravo)
+
+
+class TestPingDoGateway(unittest.TestCase):
+    """Bug achado no pve: o ping do gateway usava -q e a linha 'time=' sumia (falso 'Gateway sem resposta')."""
+    def test_um_ping_linux_mostra_a_resposta(self):
+        import os
+        if os.name == "nt":
+            self.skipTest("so Linux")
+        self.assertNotIn("-q", fonte_rede.comando_um_ping("192.168.1.1"))
+
+    def test_coletor_mede_o_gateway_de_verdade(self):
+        import server
+        alvo = server.rota_padrao()[1]
+        if not alvo:
+            self.skipTest("sem rota padrao")
+        c = server.Coletor.__new__(server.Coletor)
+        c._ping_falhas = 0
+        self.assertIsNotNone(c.ping(alvo))
+        self.assertEqual(c._ping_falhas, 0)
