@@ -296,6 +296,24 @@ O texto não usa mais a Tahoma da ROM (ficava borrada em 9–11 px na tela 320×
 - `device/fontes/previa.py` desenha as telas do mockup com a fonte nova, sem precisar do aparelho. As imagens ficam em `docs/telas/fonte-pixel/`.
 - O exe anterior, com a Tahoma, continua funcionando: o código antigo está no histórico do git.
 
+### Tela de animação (ANIME, opcional, desde 21/11/2026)
+
+Se existir um `anime.bin` na mesma pasta do `MioDash.exe`, entra uma tela a mais na rotação, só com a animação tocando em loop. Sem o arquivo, essa tela não aparece. O Windows CE do Mio não abre GIF, então o GIF é convertido antes, no PC ou servidor:
+
+```bash
+python3 device/anime/gerar_anime.py minha.gif anime.bin --previa /tmp/previa   # precisa do ImageMagick
+python3 device/anime/test_anime.py anime.bin                                     # confere o arquivo
+# copie anime.bin para \Storage Card\MioAutoRun\Apps\ (ao lado do MioDash.exe)
+```
+
+O conversor:
+- tira o fundo liso do GIF, a sombra cinza do chão, os bolsões de fundo presos e o contorno claro;
+- recorta todos os quadros pela mesma caixa;
+- reduz para até 204 px de altura;
+- grava em RGB565 com RLE.
+
+O Mio monta cada quadro num DIB de 16 bits e copia com um `BitBlt`, no ritmo do próprio GIF. Um GIF de 72 quadros 400×400 virou 148×204 e ~1 MB. O GIF e o `anime.bin` **não vão para o repositório** (`.gitignore`), porque costumam ser personagens de terceiros.
+
 ---
 
 ## 3. Cartão SD (`sdcard/`)

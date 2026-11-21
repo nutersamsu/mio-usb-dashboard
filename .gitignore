@@ -10,3 +10,8 @@ sdcard/**/*.DLL
 sdcard/**/*.lng
 sdcard/**/*.tfx
 !sdcard/MioAutoRun/Apps/MioDash.exe
+# animação pessoal (personagem de terceiros): não vai para o repositório público
+/anime.gif
+*.gif
+!docs/**/*.gif
+anime.bin

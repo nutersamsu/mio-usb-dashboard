@@ -15,7 +15,7 @@
  * Porta: argumento opcional, ex.  MioDash.exe COM9:
  *
  * Tema "sensor panel" Neon, 7 telas (internet, conexao, servidor, maquinas, servicos,
- * seguranca, sistema) + alerta. Alerta ambar (aviso, sem som) ou vermelho (critico, bip;
+ * seguranca, sistema) + ANIME (se houver anime.bin ao lado do exe) + alerta. Alerta ambar (aviso, sem som) ou vermelho (critico, bip;
  * um toque reconhece). Desenho: docs/telas-mio-v3.html.
  */
 #include <windows.h>
@@ -122,7 +122,7 @@ static int fechar_donos_da_porta(void)
 #define PROG_MS        250
 #define SEM_DADOS_MS   15000
 #define MAX_CAMPOS     64
-#define VERSAO         L"3.0"
+#define VERSAO         L"3.1"
 #define N_TELAS        7       /* sem contar a de alerta */
 #define LARG           320
 #define ALT            240
@@ -621,6 +621,104 @@ static void tri(HDC dc, int x, int y, COLORREF c, int baixo)
     poli(dc, p, 3, c, c);
 }
 
+/* ---- animacao: anime.bin ao lado do exe (gerado por device/anime/gerar_anime.py).
+ * RGB565 com RLE; cada quadro e montado num DIB de 16 bits e copiado com um BitBlt.
+ * Sem o arquivo, a tela de animacao simplesmente nao entra na rotacao. */
+#define ID_TIMER_ANIM  4
+#define ANIM_ALT_MAX   206
+static unsigned char *g_anim = NULL;
+static DWORD   g_atam = 0;
+static int     g_aw, g_ah, g_an, g_aatraso, g_aquadro = 0, g_anime_na_tela = 0;
+static unsigned short g_afundo;
+static HDC     g_adc = NULL;
+static unsigned short *g_abits = NULL;
+
+static unsigned u16(const unsigned char *p) { return p[0] | (p[1] << 8); }
+static DWORD u32(const unsigned char *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((DWORD)p[3] << 24); }
+
+static void anim_carregar(void)
+{
+    WCHAR cam[MAX_PATH], *b;
+    HANDLE f;
+    DWORD lido = 0;
+    int i, ok;
+    GetModuleFileNameW(NULL, cam, MAX_PATH);
+    b = wcsrchr(cam, L'\\');
+    if (!b) return;
+    wcscpy(b + 1, L"anime.bin");
+    f = CreateFileW(cam, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    g_atam = GetFileSize(f, NULL);
+    if (g_atam > 16 && g_atam < 8 * 1024 * 1024 && (g_anim = malloc(g_atam)) != NULL)
+        if (!ReadFile(f, g_anim, g_atam, &lido, NULL) || lido != g_atam) { free(g_anim); g_anim = NULL; }
+    CloseHandle(f);
+    if (!g_anim) return;
+    g_aw = u16(g_anim + 4); g_ah = u16(g_anim + 6); g_an = u16(g_anim + 8);
+    g_aatraso = u16(g_anim + 10); g_afundo = (unsigned short)u16(g_anim + 12);
+    ok = memcmp(g_anim, "MIOA", 4) == 0 && g_aw > 0 && g_aw <= LARG - 12 && !(g_aw & 1)
+         && g_ah > 0 && g_ah <= ANIM_ALT_MAX && g_an > 0 && 16 + 4 * (DWORD)g_an <= g_atam;
+    for (i = 0; ok && i < g_an; i++) ok = u32(g_anim + 16 + 4 * i) < g_atam;
+    if (!ok) { free(g_anim); g_anim = NULL; return; }
+    if (g_aatraso < 40) g_aatraso = 40;
+}
+
+static void anim_preparar(HWND h)
+{
+    struct { BITMAPINFOHEADER h; DWORD m[3]; } bi;
+    HDC s;
+    HBITMAP bmp;
+    if (!g_anim) return;
+    memset(&bi, 0, sizeof(bi));
+    bi.h.biSize = sizeof(BITMAPINFOHEADER);
+    bi.h.biWidth = g_aw;
+    bi.h.biHeight = g_ah;                      /* de baixo para cima (o mais compativel) */
+    bi.h.biPlanes = 1;
+    bi.h.biBitCount = 16;
+    bi.h.biCompression = BI_BITFIELDS;
+    bi.m[0] = 0xF800; bi.m[1] = 0x07E0; bi.m[2] = 0x001F;
+    s = GetDC(h);
+    g_adc = CreateCompatibleDC(s);
+    bmp = CreateDIBSection(s, (BITMAPINFO *)&bi, DIB_RGB_COLORS, (void **)&g_abits, NULL, 0);
+    ReleaseDC(h, s);
+    if (!g_adc || !bmp || !g_abits) {               /* sem memoria: fica sem a tela */
+        if (bmp) DeleteObject(bmp);
+        if (g_adc) DeleteDC(g_adc);
+        g_adc = NULL; g_abits = NULL;
+        free(g_anim); g_anim = NULL;
+        return;
+    }
+    SelectObject(g_adc, bmp);
+}
+
+static void anim_quadro(HDC dc)
+{
+    const unsigned char *p, *fim;
+    unsigned short *lin;
+    int x = 0, y = 0, n, i;
+    if (!g_anim || !g_abits) return;
+    for (i = 0; i < g_aw * g_ah; i++) g_abits[i] = g_afundo;
+    p = g_anim + u32(g_anim + 16 + 4 * (g_aquadro % g_an));
+    fim = g_anim + g_atam;
+    lin = g_abits + (g_ah - 1) * g_aw;            /* linha 0 da imagem = ultima do DIB */
+    while (y < g_ah && p < fim) {
+        int b = *p++;
+        n = (b & 0x7f) + 1;
+        if (b & 0x80) {
+            for (; n > 0 && y < g_ah && p + 2 <= fim; n--, p += 2) {
+                lin[x] = (unsigned short)(p[0] | (p[1] << 8));
+                if (++x == g_aw) { x = 0; if (++y < g_ah) lin -= g_aw; }
+            }
+            if (n > 0) break;                       /* arquivo truncado */
+        } else {
+            x += n;
+            while (x >= g_aw && y < g_ah) { x -= g_aw; if (++y < g_ah) lin -= g_aw; }
+        }
+    }
+    BitBlt(dc, (LARG - g_aw) / 2, 25 + (ANIM_ALT_MAX + 4 - g_ah) / 2, g_aw, g_ah, g_adc, 0, 0, SRCCOPY);
+}
+
+static int n_base(void) { return N_TELAS + (g_anim ? 1 : 0); }
+
 static void topo(HDC dc, const WCHAR *tit, int idx, int prog)
 {
     POINT p[4];
@@ -633,7 +731,7 @@ static void topo(HDC dc, const WCHAR *tit, int idx, int prog)
     strncpy(hora, val("h"), 5);
     hora[5] = 0;
     txta(dc, 11, 1, K_TXT, 6, 12, hora, ESQ);
-    for (i = 0; i < N_TELAS; i++) ret(dc, 40 + i * 7, 6, 5, 3, i == idx ? g_pal->b : K_OFF);
+    for (i = 0; i < n_base(); i++) ret(dc, 40 + i * 7, 6, 5, 3, i == idx ? g_pal->b : K_OFF);
     ret(dc, 234, 7, 30, 2, g_pal->b);
     txt(dc, 13, 1, K_MUT, 314, 13, L"\x00D7", DIR);
     ret(dc, 0, 18, LARG, 1, K_OFF);
@@ -1186,7 +1284,15 @@ static void tela_sem_dados(HDC dc)
     txt(dc, 10, 0, K_MUT, 160, 214, L"toque no \x00D7 para sair", MEIO);
 }
 
-static int n_telas(void) { return tem_alerta() ? N_TELAS + 1 : N_TELAS; }
+/* ANIME: so ela dancando, sem dados (a animacao roda no seu proprio timer) */
+static void tela_anime(HDC dc, int prog)
+{
+    topo(dc, L"ANIME", N_TELAS, prog);
+    painel(dc, 4, 23, 312, 213, NULL, 128);
+    anim_quadro(dc);
+}
+
+static int n_telas(void) { return tem_alerta() ? n_base() + 1 : n_base(); }
 
 static DWORD rotacao_ms(void)
 {
@@ -1210,7 +1316,9 @@ static void desenhar(HDC dc)
     }
     prog = (int)((agora - g_inicio) * LARG / rotacao_ms());
     if (prog > LARG) prog = LARG;
+    g_anime_na_tela = !semdados && g_anim && g_vista % n_telas() == N_TELAS;
     if (semdados) tela_sem_dados(dc);
+    else if (g_anime_na_tela) tela_anime(dc, prog);
     else switch (g_vista % n_telas()) {
         case 0: tela_internet(dc, prog); break;
         case 1: tela_conexao(dc, prog); break;
@@ -1241,12 +1349,22 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         g_inicio = GetTickCount();
         SetTimer(h, ID_TIMER_PROG, PROG_MS, NULL);
         SetTimer(h, ID_TIMER_IDLE, 10000, NULL);
+        anim_preparar(h);
+        if (g_anim) SetTimer(h, ID_TIMER_ANIM, g_aatraso, NULL);
         return 0;
     case WM_TIMER:
         if (w == ID_TIMER_PROG) {
             verificar_alarme();
             if (GetTickCount() - g_inicio >= rotacao_ms()) proxima_tela(h);
             else InvalidateRect(h, NULL, FALSE);
+        }
+        else if (w == ID_TIMER_ANIM) {
+            if (g_anime_na_tela) {                /* so o retangulo dela, direto na tela */
+                HDC d = GetDC(h);
+                g_aquadro = (g_aquadro + 1) % g_an;
+                anim_quadro(d);
+                ReleaseDC(h, d);
+            }
         }
         else SystemIdleTimerReset();             /* mantem tela/backlight ligados */
         return 0;
@@ -1314,6 +1432,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmd, int show)
     }
     InitializeCriticalSection(&g_cs);
     carregar_som();
+    anim_carregar();
 
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = WndProc;
