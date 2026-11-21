@@ -7,7 +7,7 @@ SAIDA   := MioDash.exe
 
 all: $(SAIDA)
 
-$(SAIDA): mio_dash.c
+$(SAIDA): mio_dash.c fontes_pixel.h
 	$(CC) $(CFLAGS) -o $@ $<
 	$(STRIP) $@
 	@echo "OK: copie $(SAIDA) para sdcard/MioAutoRun/Apps/"

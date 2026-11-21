@@ -286,6 +286,16 @@ No Mio, o `MioDash.exe`:
 
 Esses links e o código **não foram testados**. Se der erro de compilação, ajuste o `mio_dash.c`: ele usa só a API básica do `coredll`.
 
+### Fonte de pixel (desde 21/11/2026)
+
+O texto não usa mais a Tahoma da ROM (ficava borrada em 9–11 px na tela 320×240). O `MioDash.exe` traz uma **fonte de pixel embutida**, derivada da Terminus Font de Dimitar Zhekov (SIL Open Font License 1.1, texto em `device/fontes/OFL-Terminus.txt`). Ela foi recortada para ficar proporcional, e os tamanhos pequenos ganharam negrito sintético. Os tamanhos grandes são a mesma fonte ampliada em pixels inteiros. Com isso o exe passou de ~44 KB para ~117 KB.
+
+- `device/fontes_pixel.h` é **gerado**. Para mudar tamanhos ou caracteres, edite a tabela `TAMANHOS`/`CARACTERES` em `device/fontes/gerar_fontes.py` e rode:
+  `python3 device/fontes/gerar_fontes.py <pasta com Uni2-Terminus*.psf.gz> device/fontes_pixel.h`
+  (os `.psf.gz` vêm do pacote `console-setup-linux` do Debian: `apt-get download console-setup-linux && dpkg-deb -x ...`).
+- `device/fontes/previa.py` desenha as telas do mockup com a fonte nova, sem precisar do aparelho. As imagens ficam em `docs/telas/fonte-pixel/`.
+- O exe anterior, com a Tahoma, continua funcionando: o código antigo está no histórico do git.
+
 ---
 
 ## 3. Cartão SD (`sdcard/`)

@@ -451,46 +451,67 @@ static void circulo(HDC dc, int cx, int cy, int r, COLORREF c)
     DeleteObject(b); DeleteObject(pen);
 }
 
-/* ---- texto (fontes Tahoma em cache; y = linha de base, como no SVG) */
+/* ---- texto: fonte de pixel Terminus embutida (fontes_pixel.h, gerada por
+ * fontes/gerar_fontes.py). Nitida na tela 320x240, sem depender das fontes da ROM.
+ * "tam" continua sendo o tamanho Tahoma do desenho; y = linha de base, como no SVG. */
 #define ESQ 0
 #define MEIO 1
 #define DIR 2
-#define MAX_FONTES 48
-static HFONT g_fonte[MAX_FONTES];
-static int   g_ftam[MAX_FONTES], g_fneg[MAX_FONTES], g_nfontes = 0;
+#include "fontes_pixel.h"
 
-static HFONT fonte(int tam, int negrito)
+static const GlifoPx *glifo_px(const FontePx *f, WCHAR c)
 {
-    int i;
-    LOGFONTW lf;
-    for (i = 0; i < g_nfontes; i++)
-        if (g_ftam[i] == tam && g_fneg[i] == negrito) return g_fonte[i];
-    memset(&lf, 0, sizeof(lf));
-    lf.lfHeight = -tam;
-    lf.lfWeight = negrito ? FW_BOLD : FW_NORMAL;
-    lf.lfQuality = ANTIALIASED_QUALITY;
-    wcscpy(lf.lfFaceName, L"Tahoma");
-    if (g_nfontes == MAX_FONTES) return g_fonte[MAX_FONTES - 1];
-    g_fonte[g_nfontes] = CreateFontIndirectW(&lf);
-    g_ftam[g_nfontes] = tam;
-    g_fneg[g_nfontes] = negrito;
-    return g_fonte[g_nfontes++];
+    int a = 0, b = f->n - 1, m;
+    while (a <= b) {
+        m = (a + b) / 2;
+        if (f->g[m].cp == c) return &f->g[m];
+        if (f->g[m].cp < c) a = m + 1; else b = m - 1;
+    }
+    return c == L'?' ? &f->g[0] : glifo_px(f, L'?');
+}
+
+static int largura_px(const FontePx *f, int esc, const WCHAR *s)
+{
+    int t = 0;
+    for (; *s; s++) {
+        const GlifoPx *g = glifo_px(f, *s);
+        t += (g->w ? g->w : f->espaco) + (s[1] ? f->gap : 0);
+    }
+    return t * esc;
 }
 
 static int txt(HDC dc, int tam, int neg, COLORREF cor, int x, int y, const WCHAR *s, int alinh)
 {
-    TEXTMETRICW tm;
-    SIZE sz;
-    int n = wcslen(s);
-    SelectObject(dc, fonte(tam, neg));
-    GetTextMetricsW(dc, &tm);
-    GetTextExtentPoint32W(dc, s, n, &sz);
-    if (alinh == MEIO) x -= sz.cx / 2;
-    else if (alinh == DIR) x -= sz.cx;
-    SetTextColor(dc, cor);
-    SetBkMode(dc, TRANSPARENT);
-    ExtTextOutW(dc, x, y - tm.tmAscent, 0, NULL, s, n, NULL);
-    return sz.cx;
+    const FontePx *f;
+    int esc, larg, topo;
+    HBRUSH br;
+    HGDIOBJ ob;
+    fpx_escolher(tam, neg, &f, &esc);
+    larg = largura_px(f, esc, s);
+    if (alinh == MEIO) x -= larg / 2;
+    else if (alinh == DIR) x -= larg;
+    topo = y - f->base * esc;
+    br = CreateSolidBrush(cor);
+    ob = SelectObject(dc, br);
+    for (; *s; s++) {
+        const GlifoPx *g = glifo_px(f, *s);
+        const unsigned char *d = f->d + g->off;
+        int nb = (g->w + 7) / 8, r, c, ini;
+        for (r = 0; r < f->alt; r++, d += nb) {
+            /* pinta cada trecho continuo da linha com um PatBlt (bem menos chamadas
+             * que SetPixel) */
+            for (c = 0; c < g->w; ) {
+                if (!(d[c >> 3] & (0x80 >> (c & 7)))) { c++; continue; }
+                ini = c;
+                while (c < g->w && (d[c >> 3] & (0x80 >> (c & 7)))) c++;
+                PatBlt(dc, x + ini * esc, topo + r * esc, (c - ini) * esc, esc, PATCOPY);
+            }
+        }
+        x += ((g->w ? g->w : f->espaco) + f->gap) * esc;
+    }
+    SelectObject(dc, ob);
+    DeleteObject(br);
+    return larg;
 }
 
 static int txta(HDC dc, int tam, int neg, COLORREF cor, int x, int y, const char *s, int alinh)
@@ -842,10 +863,11 @@ static void anel(HDC dc, int cx, int cy, int e)
 
 static int largura(HDC dc, int tam, int neg, const WCHAR *s)
 {
-    SIZE sz;
-    SelectObject(dc, fonte(tam, neg));
-    GetTextExtentPoint32W(dc, s, wcslen(s), &sz);
-    return sz.cx;
+    const FontePx *f;
+    int esc;
+    (void)dc;
+    fpx_escolher(tam, neg, &f, &esc);
+    return largura_px(f, esc, s);
 }
 
 /* pastilha de estado alinhada pela direita em xd */
@@ -977,7 +999,7 @@ static void tela_conexao(HDC dc, int prog)
     else if (e[3] == 0) txt(dc, 22, 1, K_AM, 265, 197, L"FALHA", MEIO);
     else txt(dc, 22, 1, K_MUT, 265, 197, L"\x2013", MEIO);
     txt(dc, 9, 0, K_MUT, 265, 215, L"3 falhas = alerta", MEIO);
-    txt(dc, 9, 0, K_MUT, 265, 228, L"n\x00E3o derruba internet", MEIO);
+    txt(dc, 9, 0, K_MUT, 265, 228, L"n\x00E3o \x00E9 queda", MEIO);
 }
 
 /* ---- SEGURANCA: CrowdSec (campo cs = estado;bloqueados;novos24h;lista;idade_s) */
@@ -1273,7 +1295,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmd, int show)
     WNDCLASSW wc;
     MSG msg;
     HANDLE th;
-    int i;
     (void)prev; (void)show;
 
     {   /* instancia unica: so um MioDash pode ter a COM aberta */
@@ -1313,6 +1334,5 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmd, int show)
         DispatchMessageW(&msg);
     }
     Sleep(1200);                              /* deixa a thread fechar a porta */
-    for (i = 0; i < g_nfontes; i++) DeleteObject(g_fonte[i]);
     return 0;
 }

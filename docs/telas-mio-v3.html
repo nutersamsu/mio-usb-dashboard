@@ -225,7 +225,7 @@ const TELAS = [
       const dnsTxt = st.dns === null ? "–" : st.dns ? "OK" : "FALHA";
       s += T(265, 197, dnsTxt, 22, st.dns === 0 ? K.am : st.dns ? K.ok : K.mut, 700, "middle");
       s += T(265, 215, "3 falhas = alerta", 8.5, K.mut, 600, "middle");
-      s += T(265, 228, "não derruba internet", 8.5, K.mut, 600, "middle");
+      s += T(265, 228, "não é queda", 8.5, K.mut, 600, "middle");
       return s;
     } },
   { nome: "Servidor", desc: "Igual à v2: CPU com temperatura no centro, memória, disco, tempo ligado e ping até o OPNsense.",
