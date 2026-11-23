@@ -94,6 +94,14 @@
     "estado": "/var/lib/mio-dashboard/crowdsec-vistos.json",
     "comunidade": true
   },
+  "tomada": {
+    "ativo": false,
+    "chave_arquivo": "/etc/mio-dashboard/tomada.json",
+    "estado": "/var/lib/mio-dashboard/tomada-consumo.json",
+    "preco_kwh": 0.25,
+    "alerta_sem_resposta": false,
+    "alerta_w": 0
+  },
   "eventos_arquivo": "/var/lib/mio-dashboard/eventos.json",
   "maquinas_importantes": [
     "server",

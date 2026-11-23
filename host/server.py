@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from eventos import Eventos  # noqa: E402
 from fonte_crowdsec import CrowdSec  # noqa: E402
 from fonte_internet import TesteInternet, em_silencio  # noqa: E402
+from fonte_tomada import Tomada  # noqa: E402
 import fonte_rede  # noqa: E402
 import transporte  # noqa: E402
 from fonte_rede import DiagnosticoRede, dns_auto  # noqa: E402
@@ -99,7 +100,8 @@ def carregar_config(caminho):
 # leitura boa por fonte (falha de coleta != servico fora: CrowdSec parado e leitura boa)
 LEITURA_BOA = {"internet": lambda r: r.get("wok") == "1",
                "maquinas": lambda r: r.get("nvm", "-") != "-",
-               "crowdsec": lambda r: r.get("cs") != "e"}
+               "crowdsec": lambda r: r.get("cs") != "e",
+               "tomada": lambda r: r.get("tm", "").startswith("1;")}
 NOMES_FONTE = {"pve": "Proxmox", "crowdsec": "CrowdSec"}   # zabbix ja tem "OPNsense sem dados"
 
 VERSAO = "2026.11.20"               # do host; vai no campo 'ver' (tela Sistema)
@@ -179,6 +181,9 @@ class Coletor:
         cs = cfg.get("crowdsec")
         self.crowdsec = (CrowdSec(cs["url"], cs["chave_arquivo"], cs.get("estado"),
                                   bool(cs.get("comunidade", True))) if cs else None)
+        tm = cfg.get("tomada")                   # tela ENERGIA: tomada Tuya na rede local (opcional)
+        self.tomada = Tomada(tm) if tm and tm.get("ativo", True) else None
+        self._tomada_falha_desde = 0.0
         self._ok_em, self._inicio = {}, time.monotonic()
         self.eventos = Eventos(cfg.get("eventos_arquivo"))
         api = cfg.get("proxmox_api")
@@ -391,6 +396,8 @@ class Coletor:
                    ("net", 10, lambda: self._testar_net(agora), {"net": "1", "som": "0"})]
         if getattr(self, "crowdsec", None):
             tarefas.append(("crowdsec", 60, lambda: self.crowdsec.atualizar(time.time()), {"cs": "e"}))
+        if getattr(self, "tomada", None):
+            tarefas.append(("tomada", 10, lambda: self.tomada.atualizar(time.time()), {"tm": "e"}))
         for nome, periodo, f, se_falhar in tarefas:
             if agora - self._extra_em.get(nome, -1e9) >= periodo:
                 try:
@@ -436,6 +443,23 @@ class Coletor:
             gw_ok = self._ping_falhas < self.cfg["limites"]["ping_falhas"]
             d.update(self.diag.campos(gw_ok, d["net"] == "1", self.cfg["limites"]))
         return d
+
+    def _alertas_tomada(self, tm, agora, aviso):
+        """Tela ENERGIA: avisos opcionais (desligados por padrao) da tomada."""
+        cfg = self.cfg.get("tomada") or {}
+        if not tm:
+            return
+        partes = tm.split(";")
+        if partes[0] != "1":
+            if not getattr(self, "_tomada_falha_desde", 0.0):
+                self._tomada_falha_desde = agora
+            if cfg.get("alerta_sem_resposta") and agora - self._tomada_falha_desde > 300:
+                aviso("tomada", "Tomada sem resposta")
+            return
+        self._tomada_falha_desde = 0.0
+        limite = cfg.get("alerta_w")
+        if limite and len(partes) > 1 and partes[1] not in ("", "-") and float(partes[1]) > float(limite):
+            aviso("tomada:w", "Tomada %s W" % partes[1])
 
     def alertas(self, d, agora=None):
         """So os textos (campo alr), criticos primeiro."""
@@ -488,6 +512,7 @@ class Coletor:
             aviso("ram", "RAM %.0f%%" % d["ram"])
         if d["disco"] > L["disco"]:
             aviso("disco", "DISCO %.0f%%" % d["disco"])
+        self._alertas_tomada(ex.get("tm"), agora, aviso)
         importantes = set(self.cfg.get("maquinas_importantes", []))
         for k in range(1, 7):
             vm = ex.get("vm%d" % k, "")
