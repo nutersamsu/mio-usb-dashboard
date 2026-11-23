@@ -12,6 +12,7 @@ mio-usb-dashboard/
 │   ├── fonte_pve.py          VMs/CTs (API do PVE com token só leitura) e serviços por TCP
 │   ├── fonte_rede.py         diagnóstico: gateway, internet, DNS, latência e perda
 │   ├── fonte_crowdsec.py     CrowdSec pela LAPI (chave de bouncer, só leitura)
+│   ├── fonte_tomada.py       tomada Tuya na rede local (tela ENERGIA, opcional)
 │   ├── eventos.py            últimos eventos (alerta subiu/desceu) para a tela Sistema
 │   ├── transporte.py         envio ao Mio: /dev/mio (Linux), COMx ou USB direto (libusb)
 │   ├── config.windows.json   exemplo de config para Windows (experimental)
@@ -313,6 +314,19 @@ O conversor:
 - grava em RGB565 com RLE.
 
 O Mio monta cada quadro num DIB de 16 bits e copia com um `BitBlt`, no ritmo do próprio GIF. Um GIF de 72 quadros 400×400 virou 148×204 e ~1 MB. O GIF e o `anime.bin` **não vão para o repositório** (`.gitignore`), porque costumam ser personagens de terceiros.
+
+### Tela de energia (ENERGIA, opcional, desde 23/11/2026)
+
+Mostra uma tomada inteligente **Tuya** com medidor (testada com a LSC Power Plug EU, protocolo 3.5): watts agora, € por hora, consumo e valor de **hoje** e do **mês**, e um gráfico da última hora (12 médias de 5 min). A tomada é lida **direto na rede local**, sem nuvem e sem Home Assistant; sem internet, continua funcionando. Sem o bloco `tomada` na config, a tela não aparece.
+
+1. **Chave local** (uma vez): crie uma conta grátis em platform.tuya.com, um *Cloud Project* (Smart Home, data center da sua conta), ligue o app (Smart Life ou o app da marca) pelo QR em *Devices → Link App Account* e rode o `python -m tinytuya wizard`, ou leia a chave na API. Se a tomada for pareada de novo no app, a chave muda.
+2. Grave `/etc/mio-dashboard/tomada.json` (600, dono do serviço): `{"id": "...", "ip": "IP da tomada", "versao": 3.5, "chave": "..."}`. **Nunca no git.** Dê um IP fixo à tomada no roteador.
+3. Instale o `tinytuya` (MIT) num venv e rode o serviço com o Python desse venv: `python3 -m venv /opt/mio-usb-dashboard/venv && /opt/mio-usb-dashboard/venv/bin/pip install tinytuya`. Sem a biblioteca, a tela mostra "SEM LEITURA" e o resto segue.
+4. Config: `"tomada": {"ativo": true, "chave_arquivo": "/etc/mio-dashboard/tomada.json", "estado": "/var/lib/mio-dashboard/tomada-consumo.json", "preco_kwh": 0.25, "alerta_sem_resposta": false, "alerta_w": 0}`.
+   - `preco_kwh`: custo de **cada kWh a mais** na sua conta (energia + perdas + despacho + rede + encargos, com IVA), não a média com as quotas fixas.
+   - `alerta_sem_resposta`: aviso âmbar se a tomada sumir mais de 5 min. `alerta_w`: aviso âmbar acima desses watts (0 = desligado).
+
+O consumo é a potência integrada no tempo (W × Δt a cada 10 s, buracos maiores que 60 s não contam), porque a tomada não entrega um contador confiável na leitura normal. Dia e mês viram à meia-noite de Roma e ficam no arquivo de estado (sobrevivem a reinício). Campo na linha: `tm = te;tw;tv;ta;to;tkd;tkm;ted;tem;teh;hist`.
 
 ---
 
