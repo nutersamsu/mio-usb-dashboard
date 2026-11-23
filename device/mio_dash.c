@@ -1287,7 +1287,6 @@ static void tela_sem_dados(HDC dc)
 }
 
 /* ---- ENERGIA: tomada Tuya (tm = te;tw;tv;ta;to;tkd;tkm;ted;tem;teh;hist). So aparece com o campo tm. */
-static void virgula(char *s) { for (; *s; s++) if (*s == '.') *s = ','; }
 
 static void valor_euro(HDC dc, int x, int y, int tam, const char *v)
 {
