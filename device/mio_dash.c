@@ -717,7 +717,9 @@ static void anim_quadro(HDC dc)
     BitBlt(dc, (LARG - g_aw) / 2, 25 + (ANIM_ALT_MAX + 4 - g_ah) / 2, g_aw, g_ah, g_adc, 0, 0, SRCCOPY);
 }
 
-static int n_base(void) { return N_TELAS + (g_anim ? 1 : 0); }
+static int tem_tomada(void);
+/* telas fixas + ENERGIA (so com o campo tm) + ANIME (so com anime.bin) */
+static int n_base(void) { return N_TELAS + tem_tomada() + (g_anim ? 1 : 0); }
 
 static void topo(HDC dc, const WCHAR *tit, int idx, int prog)
 {
@@ -1284,10 +1286,96 @@ static void tela_sem_dados(HDC dc)
     txt(dc, 10, 0, K_MUT, 160, 214, L"toque no \x00D7 para sair", MEIO);
 }
 
+/* ---- ENERGIA: tomada Tuya (tm = te;tw;tv;ta;to;tkd;tkm;ted;tem;teh;hist). So aparece com o campo tm. */
+
+static void valor_euro(HDC dc, int x, int y, int tam, const char *v)
+{
+    char b[24];
+    strncpy(b, v, sizeof(b) - 1);
+    b[sizeof(b) - 1] = 0;
+    virgula(b);
+    txta(dc, tam, 1, K_TXT, x - 4, y, b, DIR);
+    txt(dc, tam * 2 / 3, 1, g_pal->a, x, y, L"\x20AC", ESQ);
+}
+
+static void tela_energia(HDC dc, int prog)
+{
+    char tm[220], te[4], w[12], v[12], a[12], on[4], kd[16], km[16], ed[16], em[16], eh[16], hist[100], s[48];
+    int ok;
+    strncpy(tm, val("tm"), sizeof(tm) - 1);
+    tm[sizeof(tm) - 1] = 0;
+    parte(tm, 0, te, sizeof(te)); parte(tm, 1, w, sizeof(w));   parte(tm, 2, v, sizeof(v));
+    parte(tm, 3, a, sizeof(a));   parte(tm, 4, on, sizeof(on)); parte(tm, 5, kd, sizeof(kd));
+    parte(tm, 6, km, sizeof(km)); parte(tm, 7, ed, sizeof(ed)); parte(tm, 8, em, sizeof(em));
+    parte(tm, 9, eh, sizeof(eh)); parte(tm, 10, hist, sizeof(hist));
+    topo(dc, L"ENERGIA", N_TELAS, prog);
+    ok = te[0] == '1';
+
+    /* agora */
+    painel(dc, 4, 23, 154, 110, L"AGORA", 0);
+    if (ok) {
+        txta(dc, 30, 1, K_TXT, 81, 76, w, MEIO);
+        txt(dc, 10, 1, g_pal->a, 81, 92, L"WATTS", MEIO);
+        strncpy(s, eh, sizeof(s) - 1); s[sizeof(s) - 1] = 0; virgula(s);
+        strncat(s, " \x80/h", sizeof(s) - strlen(s) - 1);        /* 0x80 = euro no cp1252 */
+        txta(dc, 11, 1, g_pal->b, 81, 108, s, MEIO);
+        _snprintf(s, sizeof(s), "%s V  %s A", v, a);
+        virgula(s);
+        txta(dc, 9, 0, K_MUT, 81, 125, s, MEIO);
+        txt(dc, 9, 1, on[0] == '1' ? K_OK : K_MUT, 150, 38, on[0] == '1' ? L"LIGADA" : L"DESLIGADA", DIR);
+    } else {
+        txt(dc, 34, 1, te[0] == '0' ? K_AM : K_MUT, 81, 82, L"\x2013", MEIO);
+        txt(dc, 10, 1, te[0] == '0' ? K_AM : K_MUT, 81, 104,
+            te[0] == '0' ? L"SEM RESPOSTA" : L"SEM LEITURA", MEIO);
+        txt(dc, 9, 0, K_MUT, 81, 120, te[0] == '0' ? L"tomada fora da rede?" : L"chave ou biblioteca", MEIO);
+    }
+
+    /* hoje */
+    painel(dc, 162, 23, 154, 110, L"HOJE", 102);
+    valor_euro(dc, 239, 84, 26, ed);
+    strncpy(s, kd, sizeof(s) - 6); s[sizeof(s) - 6] = 0; virgula(s); strcat(s, " kWh");
+    txta(dc, 11, 1, g_pal->b, 239, 108, s, MEIO);
+
+    /* mes */
+    painel(dc, 4, 137, 154, 99, L"M\x00CA" L"S", 179);
+    valor_euro(dc, 81, 190, 24, em);
+    strncpy(s, km, sizeof(s) - 6); s[sizeof(s) - 6] = 0; virgula(s); strcat(s, " kWh");
+    txta(dc, 11, 1, g_pal->b, 81, 212, s, MEIO);
+
+    /* ultima hora: 12 barras de 5 min (W) */
+    painel(dc, 162, 137, 154, 99, L"\x00DALTIMA HORA", 256);
+    {
+        int vals[12], n = 0, k, maior = 0;
+        char *tok = hist;
+        while (tok && *tok && n < 12) {
+            char *virg = strchr(tok, ',');
+            if (virg) *virg = 0;
+            vals[n++] = (tok[0] == '-') ? -1 : atoi(tok);
+            tok = virg ? virg + 1 : NULL;
+        }
+        for (k = 0; k < n; k++) if (vals[k] > maior) maior = vals[k];
+        if (n == 0 || maior < 0) {
+            txt(dc, 9, 0, K_MUT, 239, 192, L"juntando dados...", MEIO);
+        } else {
+            for (k = 0; k < n; k++) {
+                int x = 172 + k * 11, h;
+                if (vals[k] < 0) { ret(dc, x, 224, 8, 1, K_OFF); continue; }
+                h = maior > 0 ? vals[k] * 52 / maior : 0;
+                if (h < 1) h = 1;
+                ret(dc, x, 225 - h, 8, h, k == n - 1 ? g_pal->b : mix(K_PAN, g_pal->b, 150));
+            }
+            _snprintf(s, sizeof(s), "pico %d W", maior);
+            txta(dc, 8, 0, K_MUT, 308, 166, s, DIR);
+        }
+    }
+}
+
+static int tem_tomada(void) { const char *t = val("tm"); return t[0] && t[0] != '-' ? 1 : 0; }
+
 /* ANIME: so ela dancando, sem dados (a animacao roda no seu proprio timer) */
 static void tela_anime(HDC dc, int prog)
 {
-    topo(dc, L"ANIME", N_TELAS, prog);
+    topo(dc, L"ANIME", N_TELAS + tem_tomada(), prog);
     painel(dc, 4, 23, 312, 213, NULL, 128);
     anim_quadro(dc);
 }
@@ -1316,9 +1404,10 @@ static void desenhar(HDC dc)
     }
     prog = (int)((agora - g_inicio) * LARG / rotacao_ms());
     if (prog > LARG) prog = LARG;
-    g_anime_na_tela = !semdados && g_anim && g_vista % n_telas() == N_TELAS;
+    g_anime_na_tela = !semdados && g_anim && g_vista % n_telas() == N_TELAS + tem_tomada();
     if (semdados) tela_sem_dados(dc);
     else if (g_anime_na_tela) tela_anime(dc, prog);
+    else if (tem_tomada() && g_vista % n_telas() == N_TELAS) tela_energia(dc, prog);
     else switch (g_vista % n_telas()) {
         case 0: tela_internet(dc, prog); break;
         case 1: tela_conexao(dc, prog); break;
