@@ -321,7 +321,14 @@ Mostra uma tomada inteligente **Tuya** com medidor (testada com a LSC Power Plug
 
 1. **Chave local** (uma vez): crie uma conta grátis em platform.tuya.com, um *Cloud Project* (Smart Home, data center da sua conta), ligue o app (Smart Life ou o app da marca) pelo QR em *Devices → Link App Account* e rode o `python -m tinytuya wizard`, ou leia a chave na API. Se a tomada for pareada de novo no app, a chave muda.
 2. Grave `/etc/mio-dashboard/tomada.json` (600, dono do serviço): `{"id": "...", "ip": "IP da tomada", "versao": 3.5, "chave": "..."}`. **Nunca no git.** Dê um IP fixo à tomada no roteador.
-3. Instale o `tinytuya` (MIT) num venv e rode o serviço com o Python desse venv: `python3 -m venv /opt/mio-usb-dashboard/venv && /opt/mio-usb-dashboard/venv/bin/pip install tinytuya`. Sem a biblioteca, a tela mostra "SEM LEITURA" e o resto segue.
+3. Instale o `tinytuya` (MIT). Ele precisa de `cryptography` e `requests`, que o Debian/Proxmox já costuma ter; o `tinytuya` e o `colorama` são Python puro e podem ir numa pasta própria, sem venv e sem pacotes no sistema:
+   ```bash
+   pip install --no-deps --target /opt/mio-usb-dashboard/lib tinytuya colorama   # numa máquina com pip; copie a pasta
+   mkdir -p /etc/systemd/system/mio-dashboard.service.d
+   printf '[Service]\nEnvironment=PYTHONPATH=/opt/mio-usb-dashboard/lib\n' > /etc/systemd/system/mio-dashboard.service.d/tomada.conf
+   systemctl daemon-reload && systemctl restart mio-dashboard
+   ```
+   Sem a biblioteca, a tela mostra "SEM LEITURA" e o resto segue.
 4. Config: `"tomada": {"ativo": true, "chave_arquivo": "/etc/mio-dashboard/tomada.json", "estado": "/var/lib/mio-dashboard/tomada-consumo.json", "preco_kwh": 0.25, "alerta_sem_resposta": false, "alerta_w": 0}`.
    - `preco_kwh`: custo de **cada kWh a mais** na sua conta (energia + perdas + despacho + rede + encargos, com IVA), não a média com as quotas fixas.
    - `alerta_sem_resposta`: aviso âmbar se a tomada sumir mais de 5 min. `alerta_w`: aviso âmbar acima desses watts (0 = desligado).
